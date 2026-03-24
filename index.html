@@ -1,1304 +1,596 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TranspoTrack</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-
-    <!-- Firebase SDK -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, orderBy }
-            from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
-
-        // ── Firebase Config ──────────────────────────────────────
-        const firebaseConfig = {
-            apiKey: "AIzaSyAb0J1iT9Sa-1w4tlUjJLjIehuhgWuzF_A",
-            authDomain: "transpotrack-56f5d.firebaseapp.com",
-            projectId: "transpotrack-56f5d",
-            storageBucket: "transpotrack-56f5d.firebasestorage.app",
-            messagingSenderId: "739638200057",
-            appId: "1:739638200057:web:a99580edf4893a7e784428"
-        };
-
-        const app = initializeApp(firebaseConfig);
-        const db  = getFirestore(app);
-
-        // ── Firestore helpers ─────────────────────────────────────
-        // Dokumen tunggal untuk settings (budget, odo, maint)
-        const settingsRef = doc(db, 'transpotrack', 'settings');
-        // Koleksi transaksi
-        const trxCol = collection(db, 'transpotrack', 'data', 'transactions');
-
-        async function fsGetSettings() {
-            try {
-                const snap = await getDoc(settingsRef);
-                return snap.exists() ? snap.data() : {};
-            } catch(e) { return {}; }
-        }
-
-        async function fsSetSettings(data) {
-            await setDoc(settingsRef, data, { merge: true });
-        }
-
-        async function fsGetTrx() {
-            try {
-                const q = query(trxCol, orderBy('date', 'asc'));
-                const snap = await getDocs(q);
-                return snap.docs.map(d => ({ ...d.data(), _id: d.id }));
-            } catch(e) { return []; }
-        }
-
-        async function fsAddTrx(trx) {
-            const docRef = await addDoc(trxCol, trx);
-            return docRef.id;
-        }
-
-        async function fsDeleteAllTrx() {
-            const snap = await getDocs(trxCol);
-            const dels = snap.docs.map(d => deleteDoc(d.ref));
-            await Promise.all(dels);
-        }
-
-        // ── Expose ke window ──────────────────────────────────────
-        window._fs = { fsGetSettings, fsSetSettings, fsGetTrx, fsAddTrx, fsDeleteAllTrx };
-        window._fsReady = true;
-        document.dispatchEvent(new Event('fs-ready'));
-    </script>
-
-    <style>
-        :root {
-            --bg: #f8f9fa;
-            --surface: #ffffff;
-            --surface2: #f1f3f4;
-            --border: #e8eaed;
-            --accent: #1a73e8;
-            --accent-light: #e8f0fe;
-            --orange: #fa7b17;
-            --orange-light: #fce8d6;
-            --green: #1e8e3e;
-            --green-light: #e6f4ea;
-            --red: #d93025;
-            --red-light: #fce8e6;
-            --yellow: #f9ab00;
-            --yellow-light: #fef7e0;
-            --text: #202124;
-            --text-muted: #5f6368;
-            --text-sub: #80868b;
-            --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
-            --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
-            --radius: 16px;
-            --font: 'Roboto', 'Google Sans', sans-serif;
-        }
-
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
-        body {
-            background: var(--bg);
-            color: var(--text);
-            font-family: var(--font);
-            min-height: 100vh;
-            padding-bottom: 40px;
-            -webkit-font-smoothing: antialiased;
-        }
-
-        /* ── LOADING OVERLAY ── */
-        #loadingOverlay {
-            position: fixed; inset: 0;
-            background: var(--bg);
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            z-index: 999; gap: 16px;
-        }
-
-        .spinner {
-            width: 40px; height: 40px;
-            border: 3px solid var(--border);
-            border-top-color: var(--accent);
-            border-radius: 50%;
-            animation: spin .8s linear infinite;
-        }
-
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .loading-text { font-size: 14px; color: var(--text-muted); }
-
-        /* ── HEADER ── */
-        header {
-            background: var(--surface);
-            border-bottom: 1px solid var(--border);
-            padding: 0 20px;
-            height: 60px;
-            display: flex; align-items: center;
-            position: sticky; top: 0; z-index: 100;
-            box-shadow: var(--shadow-sm);
-        }
-
-        .header-inner {
-            max-width: 520px; margin: 0 auto; width: 100%;
-            display: flex; align-items: center; justify-content: space-between;
-        }
-
-        .logo { display: flex; align-items: center; gap: 8px; }
-
-        .logo-icon {
-            width: 32px; height: 32px; background: var(--accent);
-            border-radius: 8px; display: flex; align-items: center;
-            justify-content: center; color: white; font-size: 15px;
-        }
-
-        .logo-text { font-size: 17px; font-weight: 700; color: var(--text); letter-spacing: -0.2px; }
-        .logo-text span { color: var(--accent); }
-
-        .header-right { display: flex; align-items: center; gap: 8px; }
-
-        .month-chip {
-            background: var(--surface2); border: 1px solid var(--border);
-            border-radius: 20px; padding: 4px 12px;
-            font-size: 12px; font-weight: 500; color: var(--text-muted);
-        }
-
-        .sync-indicator {
-            width: 8px; height: 8px; border-radius: 50%;
-            background: var(--green); transition: background .3s;
-        }
-
-        .sync-indicator.syncing { background: var(--yellow); animation: blink 1s infinite; }
-        .sync-indicator.error   { background: var(--red); }
-
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
-
-        /* ── LAYOUT ── */
-        main { max-width: 520px; margin: 0 auto; padding: 16px; }
-
-        .card {
-            background: var(--surface); border: 1px solid var(--border);
-            border-radius: var(--radius); padding: 20px; margin-bottom: 14px;
-            box-shadow: var(--shadow-sm);
-        }
-
-        .card-title {
-            font-size: 13px; font-weight: 500; color: var(--text-muted);
-            text-transform: uppercase; letter-spacing: 0.06em;
-            margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
-        }
-
-        .card-title i { color: var(--accent); font-size: 12px; }
-
-        /* ── DASHBOARD ── */
-        .fin-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
-        .fin-chip { background: var(--surface2); border-radius: 12px; padding: 14px; }
-        .fin-chip.full { grid-column: 1 / -1; }
-        .fin-label { font-size: 11px; font-weight: 500; color: var(--text-sub); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
-        .fin-value { font-size: 20px; font-weight: 700; color: var(--text); line-height: 1.1; }
-        .fin-value.orange { color: var(--orange); }
-        .fin-sub { font-size: 11px; color: var(--text-sub); margin-top: 3px; }
-        .prog-wrap { background: var(--border); border-radius: 4px; height: 4px; overflow: hidden; margin-top: 10px; }
-        .prog-bar { height: 100%; border-radius: 4px; background: var(--accent); transition: width .5s ease, background .3s; }
-
-        .budget-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-        .budget-inp {
-            flex: 1; background: var(--surface); border: 1px solid var(--border);
-            border-radius: 10px; color: var(--text); font-family: var(--font);
-            font-size: 14px; padding: 8px 12px; outline: none;
-        }
-        .budget-inp:focus { border-color: var(--accent); }
-        .budget-save {
-            background: var(--accent); color: white; border: none;
-            border-radius: 10px; font-size: 12px; font-weight: 500;
-            padding: 8px 14px; cursor: pointer; white-space: nowrap;
-        }
-
-        /* ── FORM ── */
-        .field { margin-bottom: 14px; }
-        .field-label {
-            display: block; font-size: 11px; font-weight: 500; color: var(--text-muted);
-            text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;
-        }
-
-        .inp {
-            width: 100%; background: var(--surface2); border: 1.5px solid var(--border);
-            border-radius: 10px; color: var(--text); font-family: var(--font);
-            font-size: 14px; padding: 10px 12px; outline: none; transition: border-color .2s;
-            appearance: none; -webkit-appearance: none;
-        }
-
-        .inp:focus { border-color: var(--accent); background: var(--surface); }
-        .inp option { background: white; }
-
-        .sel-wrap { position: relative; }
-        .sel-wrap::after {
-            content: '\f078'; font-family: 'Font Awesome 6 Free'; font-weight: 900;
-            position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-            color: var(--text-sub); pointer-events: none; font-size: 11px;
-        }
-
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
-        .type-toggle {
-            display: grid; grid-template-columns: 1fr 1fr;
-            background: var(--surface2); border: 1px solid var(--border);
-            border-radius: 10px; padding: 3px; gap: 3px;
-        }
-
-        .type-btn {
-            border: none; border-radius: 8px; font-family: var(--font);
-            font-size: 13px; font-weight: 500; padding: 9px; cursor: pointer;
-            background: transparent; color: var(--text-muted); transition: all .2s;
-        }
-
-        .type-btn.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); }
-
-        .submit-btn {
-            width: 100%; background: var(--accent); color: white; border: none;
-            border-radius: 10px; font-family: var(--font); font-size: 14px;
-            font-weight: 600; padding: 13px; cursor: pointer; transition: all .2s; margin-top: 4px;
-        }
-
-        .submit-btn:active { transform: scale(.99); }
-        .submit-btn.ok { background: var(--green); }
-        .submit-btn:disabled { opacity: .6; cursor: not-allowed; }
-
-        /* ── REMINDER ── */
-        .motor-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
-        .mtab {
-            flex: 1; background: var(--surface2); border: 1.5px solid var(--border);
-            border-radius: 10px; color: var(--text-muted); font-size: 12px; font-weight: 500;
-            padding: 8px; cursor: pointer; text-align: center; transition: all .2s;
-        }
-        .mtab.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
-
-        .rem-summary { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-        .rem-chip {
-            display: flex; align-items: center; gap: 6px;
-            background: var(--surface2); border: 1px solid var(--border);
-            border-radius: 8px; padding: 8px 12px; flex: 1; min-width: 120px;
-        }
-        .rem-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .rem-chip-name { font-size: 12px; font-weight: 500; color: var(--text); flex: 1; }
-        .rem-chip-val { font-size: 11px; font-weight: 600; white-space: nowrap; }
-
-        .chip-ok .rem-chip-dot { background: var(--green); }
-        .chip-ok .rem-chip-val { color: var(--green); }
-        .chip-warn .rem-chip-dot { background: var(--yellow); }
-        .chip-warn .rem-chip-val { color: var(--yellow); }
-        .chip-danger .rem-chip-dot { background: var(--red); animation: blink 1.2s infinite; }
-        .chip-danger .rem-chip-val { color: var(--red); }
-
-        .expand-btn {
-            width: 100%; background: transparent; border: 1px dashed var(--border);
-            border-radius: 8px; color: var(--text-sub); font-size: 12px; font-weight: 500;
-            padding: 8px; cursor: pointer; margin-top: 4px; transition: all .2s;
-        }
-        .expand-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-        .rem-full-list { margin-top: 10px; }
-        .rem-row {
-            display: flex; align-items: center; gap: 10px;
-            padding: 10px 0; border-bottom: 1px solid var(--border);
-        }
-        .rem-row:last-child { border-bottom: none; }
-        .rem-dot-col { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-        .rem-info { flex: 1; min-width: 0; }
-        .rem-part { font-size: 13px; font-weight: 500; color: var(--text); }
-        .rem-meta { font-size: 11px; color: var(--text-sub); margin-top: 1px; }
-        .rem-bar-bg { background: var(--border); border-radius: 3px; height: 4px; overflow: hidden; }
-        .rem-bar { height: 100%; border-radius: 3px; transition: width .4s; }
-        .rem-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
-
-        /* ── CALENDAR ── */
-        .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-        .cal-nav-btn {
-            background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
-            width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
-            cursor: pointer; color: var(--text-muted); font-size: 13px; transition: all .2s;
-        }
-        .cal-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
-        .cal-month-label { font-size: 14px; font-weight: 600; color: var(--text); }
-
-        .cal-header { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; margin-bottom: 6px; }
-        .cal-header span { font-size: 10px; font-weight: 600; color: var(--text-sub); padding: 4px 0; text-transform: uppercase; }
-        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
-
-        .cal-day {
-            aspect-ratio: 1; display: flex; flex-direction: column;
-            align-items: center; justify-content: center; border-radius: 8px;
-            cursor: default; transition: all .15s; position: relative;
-            font-size: 12px; font-weight: 400; color: var(--text-muted);
-        }
-        .cal-day.cur-month { color: var(--text); font-weight: 500; }
-        .cal-day.today { background: var(--accent-light); color: var(--accent); font-weight: 700; }
-        .cal-day.has-trx { cursor: pointer; }
-        .cal-day.has-trx:hover { background: var(--surface2); }
-        .cal-day.selected { background: var(--accent); color: white !important; }
-        .cal-day.selected .cal-dot { background: rgba(255,255,255,0.7) !important; }
-
-        .cal-dots { display: flex; gap: 2px; justify-content: center; position: absolute; bottom: 3px; }
-        .cal-dot { width: 4px; height: 4px; border-radius: 50%; }
-        .dot-blue { background: var(--accent); }
-        .dot-orange { background: var(--orange); }
-
-        .day-popup {
-            background: var(--surface); border: 1px solid var(--border);
-            border-radius: 12px; padding: 14px; margin-top: 10px; box-shadow: var(--shadow-md);
-        }
-        .popup-date { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 10px; }
-        .popup-item {
-            display: flex; align-items: center; gap: 10px;
-            padding: 8px 0; border-bottom: 1px solid var(--border);
-        }
-        .popup-item:last-child { border-bottom: none; }
-        .popup-icon {
-            width: 32px; height: 32px; border-radius: 8px;
-            display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0;
-        }
-        .popup-icon.h { background: var(--accent-light); color: var(--accent); }
-        .popup-icon.s { background: var(--orange-light); color: var(--orange); }
-        .popup-info { flex: 1; }
-        .popup-name { font-size: 13px; font-weight: 500; }
-        .popup-meta { font-size: 11px; color: var(--text-sub); }
-        .popup-amount { font-size: 13px; font-weight: 700; color: var(--text); }
-
-        /* ── FULL HISTORY ── */
-        .full-hist-btn {
-            width: 100%; background: var(--surface2); border: 1px solid var(--border);
-            border-radius: 10px; color: var(--text-muted); font-size: 13px; font-weight: 500;
-            padding: 10px; cursor: pointer; margin-top: 8px; transition: all .2s;
-        }
-        .full-hist-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-        .full-hist-panel { display: none; margin-top: 12px; }
-        .full-hist-panel.open { display: block; }
-
-        .hist-filters { display: flex; gap: 8px; margin-bottom: 12px; }
-        .hist-filter {
-            flex: 1; background: var(--surface2); border: 1px solid var(--border);
-            border-radius: 8px; color: var(--text); font-size: 12px;
-            padding: 7px 10px; outline: none; font-family: var(--font);
-            appearance: none; -webkit-appearance: none;
-        }
-
-        .hist-item {
-            display: flex; align-items: center; gap: 10px;
-            padding: 10px; background: var(--surface2);
-            border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px;
-        }
-        .hist-icon { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
-        .hist-icon.h { background: var(--accent-light); color: var(--accent); }
-        .hist-icon.s { background: var(--orange-light); color: var(--orange); }
-        .hist-info { flex: 1; min-width: 0; }
-        .hist-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .hist-meta { font-size: 11px; color: var(--text-sub); margin-top: 2px; }
-        .hist-amt { font-size: 13px; font-weight: 700; white-space: nowrap; }
-
-        .show-more {
-            width: 100%; background: transparent; border: 1px dashed var(--border);
-            border-radius: 8px; color: var(--text-sub); font-size: 12px;
-            padding: 9px; cursor: pointer; margin-top: 4px; transition: all .2s;
-        }
-        .show-more:hover { border-color: var(--accent); color: var(--accent); }
-
-        /* ── TOAST ── */
-        .toast {
-            position: fixed; bottom: 24px; left: 50%;
-            transform: translateX(-50%) translateY(10px);
-            background: #303134; color: white; font-size: 13px; font-weight: 500;
-            padding: 10px 20px; border-radius: 24px; opacity: 0; transition: all .3s;
-            z-index: 200; pointer-events: none; white-space: nowrap; box-shadow: var(--shadow-md);
-        }
-        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        .toast.green { background: var(--green); }
-
-        .export-btn {
-            width: 100%; background: transparent; border: 1px solid #c6dafc;
-            border-radius: 8px; color: var(--accent); font-size: 12px;
-            padding: 9px; cursor: pointer; margin-top: 8px; transition: all .2s;
-        }
-        .export-btn:hover { background: var(--accent-light); }
-
-        .del-btn {
-            width: 100%; background: transparent; border: 1px solid #fad2cf;
-            border-radius: 8px; color: var(--red); font-size: 12px;
-            padding: 9px; cursor: pointer; margin-top: 8px; opacity: .7; transition: opacity .2s;
-        }
-        .del-btn:hover { opacity: 1; }
-
-        .empty { text-align: center; padding: 20px; color: var(--text-sub); font-size: 13px; }
-        .empty i { display: block; font-size: 24px; opacity: .3; margin-bottom: 8px; }
-
-        /* ── MODAL ── */
-        .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,.4);
-            display: flex; align-items: center; justify-content: center;
-            z-index: 300; opacity: 0; pointer-events: none; transition: opacity .2s;
-        }
-        .modal-overlay.open { opacity: 1; pointer-events: all; }
-        .modal {
-            background: var(--surface); border-radius: 20px; padding: 28px 24px;
-            max-width: 340px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,.2);
-            transform: translateY(20px); transition: transform .2s;
-        }
-        .modal-overlay.open .modal { transform: translateY(0); }
-        .modal-icon { font-size: 32px; text-align: center; margin-bottom: 14px; }
-        .modal-title { font-size: 17px; font-weight: 700; text-align: center; margin-bottom: 8px; }
-        .modal-body { font-size: 13px; color: var(--text-muted); text-align: center; line-height: 1.6; margin-bottom: 20px; }
-        .modal-btns { display: flex; gap: 10px; }
-        .mbtn { flex: 1; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; padding: 12px; cursor: pointer; transition: all .2s; }
-        .mbtn.cancel { background: var(--surface2); color: var(--text-muted); }
-        .mbtn.export { background: var(--accent); color: white; }
-        .mbtn.danger { background: var(--red); color: white; }
-
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TranspoTrack</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, orderBy }
+    from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+const firebaseConfig = {
+    apiKey: "AIzaSyAb0J1iT9Sa-1w4tlUjJLjIehuhgWuzF_A",
+    authDomain: "transpotrack-56f5d.firebaseapp.com",
+    projectId: "transpotrack-56f5d",
+    storageBucket: "transpotrack-56f5d.firebasestorage.app",
+    messagingSenderId: "739638200057",
+    appId: "1:739638200057:web:a99580edf4893a7e784428"
+};
+const app=initializeApp(firebaseConfig),db=getFirestore(app);
+const settingsRef=doc(db,'transpotrack','settings');
+const trxCol=collection(db,'transpotrack','data','transactions');
+async function fsGetSettings(){try{const s=await getDoc(settingsRef);return s.exists()?s.data():{}}catch(e){return{}}}
+async function fsSetSettings(d){await setDoc(settingsRef,d,{merge:true})}
+async function fsGetTrx(){try{const q=query(trxCol,orderBy('date','asc'));const s=await getDocs(q);return s.docs.map(d=>({...d.data(),_id:d.id}))}catch(e){return[]}}
+async function fsAddTrx(t){const r=await addDoc(trxCol,t);return r.id}
+async function fsDeleteAllTrx(){const s=await getDocs(trxCol);await Promise.all(s.docs.map(d=>deleteDoc(d.ref)))}
+window._fs={fsGetSettings,fsSetSettings,fsGetTrx,fsAddTrx,fsDeleteAllTrx};
+window._fsReady=true;
+document.dispatchEvent(new Event('fs-ready'));
+</script>
+<style>
+:root{--bg:#f8f9fa;--surface:#fff;--surface2:#f1f3f4;--border:#e8eaed;--accent:#1a73e8;--accent-light:#e8f0fe;--orange:#fa7b17;--orange-light:#fce8d6;--green:#1e8e3e;--green-light:#e6f4ea;--red:#d93025;--red-light:#fce8e6;--yellow:#f9ab00;--yellow-light:#fef7e0;--text:#202124;--text-muted:#5f6368;--text-sub:#80868b;--shadow-sm:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);--shadow-md:0 4px 12px rgba(0,0,0,.08);--radius:16px;--font:'Roboto','Google Sans',sans-serif;--nav-h:60px;--bnav-h:60px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;padding-bottom:var(--bnav-h);-webkit-font-smoothing:antialiased}
+#loadingOverlay{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;gap:16px}
+.spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:14px;color:var(--text-muted)}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 20px;height:var(--nav-h);display:flex;align-items:center;position:sticky;top:0;z-index:100;box-shadow:var(--shadow-sm)}
+.header-inner{max-width:520px;margin:0 auto;width:100%;display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:8px}
+.logo-icon{width:32px;height:32px;background:var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px}
+.logo-text{font-size:17px;font-weight:700;letter-spacing:-.2px}
+.logo-text span{color:var(--accent)}
+.header-right{display:flex;align-items:center;gap:8px}
+.month-chip{background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:500;color:var(--text-muted)}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:var(--green);transition:background .3s}
+.sync-dot.syncing{background:var(--yellow);animation:blink 1s infinite}
+.sync-dot.error{background:var(--red)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);display:flex;height:var(--bnav-h);z-index:100;box-shadow:0 -2px 8px rgba(0,0,0,.06)}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;color:var(--text-muted);font-size:11px;font-weight:500;transition:color .2s;border:none;background:transparent;padding:0}
+.nav-item i{font-size:18px;transition:color .2s}
+.nav-item.active{color:var(--accent)}
+.page{display:none}
+.page.active{display:block}
+.alert-banner{background:var(--red-light);border:1px solid #f5c6c3;border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;position:relative}
+.alert-banner.warn{background:var(--yellow-light);border-color:#fde8a0}
+.alert-title{font-size:13px;font-weight:700;color:var(--red);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.alert-banner.warn .alert-title{color:#c17f00}
+.alert-close{position:absolute;top:10px;right:12px;background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px}
+.alert-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px;border-bottom:1px solid rgba(0,0,0,.06)}
+.alert-row:last-child{border-bottom:none}
+.alert-part{font-weight:500;color:var(--text)}
+.alert-val{font-weight:600;color:var(--red);font-size:11px}
+.alert-banner.warn .alert-val{color:#c17f00}
+main{max-width:520px;margin:0 auto;padding:16px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px;box-shadow:var(--shadow-sm)}
+.card-title{font-size:13px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.card-title i{color:var(--accent);font-size:12px}
+.fin-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.fin-chip{background:var(--surface2);border-radius:12px;padding:14px}
+.fin-chip.full{grid-column:1/-1}
+.fin-label{font-size:11px;font-weight:500;color:var(--text-sub);margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}
+.fin-value{font-size:20px;font-weight:700;line-height:1.1}
+.fin-value.orange{color:var(--orange)}
+.fin-sub{font-size:11px;color:var(--text-sub);margin-top:3px}
+.prog-wrap{background:var(--border);border-radius:4px;height:4px;overflow:hidden;margin-top:10px}
+.prog-bar{height:100%;border-radius:4px;background:var(--accent);transition:width .5s,background .3s}
+.budget-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.budget-inp{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:var(--font);font-size:14px;padding:8px 12px;outline:none}
+.budget-inp:focus{border-color:var(--accent)}
+.budget-save{background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:500;padding:8px 14px;cursor:pointer;white-space:nowrap}
+.field{margin-bottom:14px}
+.field-label{display:block;font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.inp{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-family:var(--font);font-size:14px;padding:10px 12px;outline:none;transition:border-color .2s;appearance:none;-webkit-appearance:none}
+.inp:focus{border-color:var(--accent);background:var(--surface)}
+.inp option{background:#fff}
+.sel-wrap{position:relative}
+.sel-wrap::after{content:'\f078';font-family:'Font Awesome 6 Free';font-weight:900;position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--text-sub);pointer-events:none;font-size:11px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.type-toggle{display:grid;grid-template-columns:1fr 1fr;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:3px;gap:3px}
+.type-btn{border:none;border-radius:8px;font-family:var(--font);font-size:13px;font-weight:500;padding:9px;cursor:pointer;background:transparent;color:var(--text-muted);transition:all .2s}
+.type-btn.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow-sm)}
+.submit-btn{width:100%;background:var(--accent);color:#fff;border:none;border-radius:10px;font-family:var(--font);font-size:14px;font-weight:600;padding:13px;cursor:pointer;transition:all .2s;margin-top:4px}
+.submit-btn:active{transform:scale(.99)}
+.submit-btn.ok{background:var(--green)}
+.submit-btn:disabled{opacity:.6;cursor:not-allowed}
+.motor-tabs{display:flex;gap:6px;margin-bottom:14px}
+.mtab{flex:1;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;color:var(--text-muted);font-size:12px;font-weight:500;padding:8px;cursor:pointer;text-align:center;transition:all .2s}
+.mtab.active{background:var(--accent-light);border-color:var(--accent);color:var(--accent)}
+.rem-summary{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.rem-chip{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;flex:1;min-width:120px}
+.rem-chip-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.rem-chip-name{font-size:12px;font-weight:500;flex:1}
+.rem-chip-val{font-size:11px;font-weight:600;white-space:nowrap}
+.chip-ok .rem-chip-dot{background:var(--green)}.chip-ok .rem-chip-val{color:var(--green)}
+.chip-warn .rem-chip-dot{background:var(--yellow)}.chip-warn .rem-chip-val{color:var(--yellow)}
+.chip-danger .rem-chip-dot{background:var(--red);animation:blink 1.2s infinite}.chip-danger .rem-chip-val{color:var(--red)}
+.expand-btn{width:100%;background:transparent;border:1px dashed var(--border);border-radius:8px;color:var(--text-sub);font-size:12px;font-weight:500;padding:8px;cursor:pointer;margin-top:4px;transition:all .2s}
+.expand-btn:hover{border-color:var(--accent);color:var(--accent)}
+.rem-full-list{margin-top:10px}
+.rem-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.rem-row:last-child{border-bottom:none}
+.rem-dot-col{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.rem-info{flex:1;min-width:0}
+.rem-part{font-size:13px;font-weight:500}
+.rem-meta{font-size:11px;color:var(--text-sub);margin-top:1px}
+.rem-bar-bg{background:var(--border);border-radius:3px;height:4px;overflow:hidden}
+.rem-bar{height:100%;border-radius:3px;transition:width .4s}
+.rem-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
+.part-motor-tabs{display:flex;gap:6px;margin-bottom:16px}
+.part-mtab{flex:1;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;color:var(--text-muted);font-size:12px;font-weight:500;padding:9px;cursor:pointer;text-align:center;transition:all .2s}
+.part-mtab.active{background:var(--accent-light);border-color:var(--accent);color:var(--accent)}
+.part-card{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;transition:border-color .2s}
+.part-card.status-danger{border-color:#f5c6c3;background:var(--red-light)}
+.part-card.status-warn{border-color:#fde8a0;background:var(--yellow-light)}
+.part-card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.part-name{font-size:14px;font-weight:700;color:var(--text)}
+.part-status-badge{font-size:10px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;flex-shrink:0;margin-left:8px}
+.badge-ok{background:var(--green-light);color:var(--green)}
+.badge-warn{background:var(--yellow-light);color:#c17f00}
+.badge-danger{background:var(--red-light);color:var(--red)}
+.part-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-bottom:10px}
+.part-info-label{font-size:10px;color:var(--text-sub);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.part-info-value{font-size:13px;font-weight:600;color:var(--text)}
+.part-prog-wrap{background:rgba(0,0,0,.08);border-radius:4px;height:6px;overflow:hidden}
+.part-prog-bar{height:100%;border-radius:4px;transition:width .5s}
+.part-advice{font-size:11px;color:var(--text-muted);margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,.06);font-style:italic}
+.odo-info{font-size:12px;color:var(--text-sub);margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;display:flex;justify-content:space-between}
+.odo-info strong{color:var(--text)}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.cal-nav-btn{background:var(--surface2);border:1px solid var(--border);border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-muted);font-size:13px;transition:all .2s}
+.cal-nav-btn:hover{border-color:var(--accent);color:var(--accent)}
+.cal-month-label{font-size:14px;font-weight:600}
+.cal-header{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;margin-bottom:6px}
+.cal-header span{font-size:10px;font-weight:600;color:var(--text-sub);padding:4px 0;text-transform:uppercase}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;cursor:default;transition:all .15s;position:relative;font-size:12px;font-weight:400;color:var(--text-muted)}
+.cal-day.cur-month{color:var(--text);font-weight:500}
+.cal-day.today{background:var(--accent-light);color:var(--accent);font-weight:700}
+.cal-day.has-trx{cursor:pointer}
+.cal-day.has-trx:hover{background:var(--surface2)}
+.cal-day.selected{background:var(--accent);color:#fff !important}
+.cal-day.selected .cal-dot{background:rgba(255,255,255,.7) !important}
+.cal-dots{display:flex;gap:2px;justify-content:center;position:absolute;bottom:3px}
+.cal-dot{width:4px;height:4px;border-radius:50%}
+.dot-blue{background:var(--accent)}
+.dot-orange{background:var(--orange)}
+.day-popup{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:10px;box-shadow:var(--shadow-md)}
+.popup-date{font-size:12px;font-weight:600;color:var(--accent);margin-bottom:10px}
+.popup-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.popup-item:last-child{border-bottom:none}
+.popup-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.popup-icon.h{background:var(--accent-light);color:var(--accent)}
+.popup-icon.s{background:var(--orange-light);color:var(--orange)}
+.popup-info{flex:1}
+.popup-name{font-size:13px;font-weight:500}
+.popup-meta{font-size:11px;color:var(--text-sub)}
+.popup-amount{font-size:13px;font-weight:700}
+.full-hist-btn{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text-muted);font-size:13px;font-weight:500;padding:10px;cursor:pointer;margin-top:8px;transition:all .2s}
+.full-hist-btn:hover{border-color:var(--accent);color:var(--accent)}
+.full-hist-panel{display:none;margin-top:12px}
+.full-hist-panel.open{display:block}
+.hist-filters{display:flex;gap:8px;margin-bottom:12px}
+.hist-filter{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;padding:7px 10px;outline:none;font-family:var(--font);appearance:none;-webkit-appearance:none}
+.hist-item{display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;margin-bottom:6px}
+.hist-icon{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.hist-icon.h{background:var(--accent-light);color:var(--accent)}
+.hist-icon.s{background:var(--orange-light);color:var(--orange)}
+.hist-info{flex:1;min-width:0}
+.hist-name{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist-meta{font-size:11px;color:var(--text-sub);margin-top:2px}
+.hist-amt{font-size:13px;font-weight:700;white-space:nowrap}
+.show-more{width:100%;background:transparent;border:1px dashed var(--border);border-radius:8px;color:var(--text-sub);font-size:12px;padding:9px;cursor:pointer;margin-top:4px;transition:all .2s}
+.show-more:hover{border-color:var(--accent);color:var(--accent)}
+.export-btn{width:100%;background:transparent;border:1px solid #c6dafc;border-radius:8px;color:var(--accent);font-size:12px;padding:9px;cursor:pointer;margin-top:8px;transition:all .2s}
+.export-btn:hover{background:var(--accent-light)}
+.del-btn{width:100%;background:transparent;border:1px solid #fad2cf;border-radius:8px;color:var(--red);font-size:12px;padding:9px;cursor:pointer;margin-top:8px;opacity:.7;transition:opacity .2s}
+.del-btn:hover{opacity:1}
+.toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%) translateY(10px);background:#303134;color:#fff;font-size:13px;font-weight:500;padding:10px 20px;border-radius:24px;opacity:0;transition:all .3s;z-index:200;pointer-events:none;white-space:nowrap;box-shadow:var(--shadow-md)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.green{background:var(--green)}
+.empty{text-align:center;padding:20px;color:var(--text-sub);font-size:13px}
+.empty i{display:block;font-size:24px;opacity:.3;margin-bottom:8px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:300;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--surface);border-radius:20px;padding:28px 24px;max-width:340px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2);transform:translateY(20px);transition:transform .2s}
+.modal-overlay.open .modal{transform:translateY(0)}
+.modal-icon{font-size:32px;text-align:center;margin-bottom:14px}
+.modal-title{font-size:17px;font-weight:700;text-align:center;margin-bottom:8px}
+.modal-body{font-size:13px;color:var(--text-muted);text-align:center;line-height:1.6;margin-bottom:20px}
+.modal-btns{display:flex;gap:10px}
+.mbtn{flex:1;border:none;border-radius:10px;font-size:14px;font-weight:600;padding:12px;cursor:pointer;transition:all .2s}
+.mbtn.cancel{background:var(--surface2);color:var(--text-muted)}
+.mbtn.export{background:var(--accent);color:#fff}
+.mbtn.danger{background:var(--red);color:#fff}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+</style>
 </head>
 <body>
-
-<!-- Loading overlay -->
-<div id="loadingOverlay">
-    <div class="spinner"></div>
-    <div class="loading-text">Memuat data...</div>
-</div>
-
+<div id="loadingOverlay"><div class="spinner"></div><div class="loading-text">Memuat data...</div></div>
 <header>
-    <div class="header-inner">
-        <div class="logo">
-            <div class="logo-icon"><i class="fas fa-motorcycle"></i></div>
-            <div class="logo-text">Transpo<span>Track</span></div>
-        </div>
-        <div class="header-right">
-            <div class="sync-indicator" id="syncDot" title="Status sinkronisasi"></div>
-            <div class="month-chip" id="currentMonthYear">—</div>
-        </div>
-    </div>
+<div class="header-inner">
+<div class="logo"><div class="logo-icon"><i class="fas fa-motorcycle"></i></div><div class="logo-text">Transpo<span>Track</span></div></div>
+<div class="header-right"><div class="sync-dot" id="syncDot"></div><div class="month-chip" id="currentMonthYear">—</div></div>
+</div>
 </header>
 
-<main>
+<!-- TAB BERANDA -->
+<div class="page active" id="page-beranda"><main>
+<div id="alertBanner" style="display:none;"></div>
+<div class="card">
+<div class="card-title"><i class="fas fa-wallet"></i> Keuangan Bulan Ini</div>
+<div class="fin-row">
+<div class="fin-chip"><div class="fin-label">Rutin</div><div class="fin-value" id="totalHarian">Rp 0</div><div class="fin-sub" id="budgetSub">–</div><div class="prog-wrap"><div class="prog-bar" id="budgetBar" style="width:0%"></div></div></div>
+<div class="fin-chip"><div class="fin-label">Servis & Part</div><div class="fin-value orange" id="totalServis">Rp 0</div><div class="fin-sub">insidental</div></div>
+<div class="fin-chip full"><div class="fin-label">Atur Budget Bulanan</div><div class="budget-row"><input class="budget-inp" type="number" id="budgetInp" placeholder="420000"><button class="budget-save" onclick="saveBudget()">Simpan</button></div></div>
+</div>
+</div>
+<div class="card">
+<div class="card-title"><i class="fas fa-plus-circle"></i> Catat Aktivitas</div>
+<div class="field"><label class="field-label">Motor</label><div class="sel-wrap"><select class="inp" id="motorSel" onchange="updateOdoPlaceholder()"><option value="BeatDLX">Beat Deluxe</option><option value="BeatPop">Beat Pop</option></select></div></div>
+<div class="field grid-2">
+<div><label class="field-label">Tanggal</label><div class="sel-wrap"><select class="inp" id="inputTgl"></select></div></div>
+<div><label class="field-label">Bulan</label><div class="sel-wrap"><select class="inp" id="inputBln"></select></div></div>
+</div>
+<div class="field"><label class="field-label">Odometer Saat Ini (KM)</label><input class="inp" type="number" id="odoInp" placeholder="Input KM sekarang"></div>
+<div class="field"><label class="field-label">Jenis Catatan</label>
+<div class="type-toggle">
+<button class="type-btn active" id="btnHarian" onclick="setType('harian')"><i class="fas fa-gas-pump"></i> Harian / Rutin</button>
+<button class="type-btn" id="btnServis" onclick="setType('servis')"><i class="fas fa-wrench"></i> Servis / Part</button>
+</div></div>
+<div id="harianFields"><div class="field"><label class="field-label">Kategori</label><div class="sel-wrap"><select class="inp" id="katHarian" onchange="autoFill()">
+<option value="Bensin">⛽ Bensin</option><option value="Isi Angin">💨 Isi Angin Ban</option><option value="Tambal Ban">🔧 Tambal Ban</option><option value="Cuci Motor">🚿 Cuci Motor</option>
+</select></div></div></div>
+<div id="servisFields" style="display:none;">
+<div class="field"><label class="field-label">Part / Jenis Servis</label><div class="sel-wrap"><select class="inp" id="katServis" onchange="onServisChange()">
+<optgroup label="🛢️ Fluida"><option value="Oli Mesin">Oli Mesin</option><option value="Oli Gardan">Oli Gardan (Transmisi)</option><option value="Minyak Rem">Minyak Rem</option></optgroup>
+<optgroup label="⚙️ Servis Berkala"><option value="Servis CVT">Servis CVT</option><option value="Servis Injeksi (FI Cleaning)">Servis Injeksi (FI Cleaning)</option><option value="Tune Up">Tune Up</option></optgroup>
+<optgroup label="🔩 Part CVT"><option value="V-Belt">V-Belt</option><option value="Roller CVT">Roller CVT</option><option value="Kampas Ganda">Kampas Ganda</option><option value="Slider / Per CVT">Slider / Per CVT</option></optgroup>
+<optgroup label="🛑 Pengereman"><option value="Kampas Rem Depan">Kampas Rem Depan</option><option value="Kampas Rem Belakang">Kampas Rem Belakang</option></optgroup>
+<optgroup label="🔌 Pengapian & Filter"><option value="Busi">Busi</option><option value="Filter Udara">Filter Udara</option></optgroup>
+<optgroup label="🔋 Kelistrikan & Lampu"><option value="Aki / Baterai">Aki / Baterai</option><option value="Lampu Depan (Headlamp)">Lampu Depan (Headlamp)</option><option value="Lampu Belakang / Stop Lamp">Lampu Belakang / Stop Lamp</option><option value="Lampu Sein Kiri">Lampu Sein Kiri</option><option value="Lampu Sein Kanan">Lampu Sein Kanan</option></optgroup>
+<optgroup label="🛞 Ban"><option value="Ban Depan">Ban Depan (Ganti)</option><option value="Ban Belakang">Ban Belakang (Ganti)</option></optgroup>
+<optgroup label="📝 Lainnya"><option value="Lainnya">Lainnya (isi manual)</option></optgroup>
+</select></div></div>
+<div id="oilBox" style="display:none;" class="field"><label class="field-label">Jenis Oli Mesin</label><div class="sel-wrap"><select class="inp" id="jenisOli"><option value="2000">Oli Standar (interval 2.000 KM)</option><option value="5000">X-TEN Ester Synthetic – Planet Ban (interval 5.000 KM)</option></select></div></div>
+<div id="lainnyaBox" style="display:none;" class="field"><label class="field-label">Keterangan Part / Servis</label><input class="inp" type="text" id="lainnyaInp" placeholder="Contoh: Seal Pulley, Per Kampas..."></div>
+</div>
+<div class="field"><label class="field-label">Biaya (Rp)</label><input class="inp" type="number" id="biayaInp" placeholder="Contoh: 40000"></div>
+<button class="submit-btn" id="submitBtn" onclick="submitRecord()">Simpan Catatan</button>
+</div>
+<div class="card">
+<div class="card-title"><i class="fas fa-gauge-high"></i> Kondisi & Jadwal Perawatan</div>
+<div class="motor-tabs"><div class="mtab active" id="remTab_BeatDLX" onclick="setRemTab('BeatDLX')">🏍 Beat Deluxe</div><div class="mtab" id="remTab_BeatPop" onclick="setRemTab('BeatPop')">🏍 Beat Pop</div></div>
+<div id="remSummary" class="rem-summary"></div>
+<button class="expand-btn" id="expandBtn" onclick="toggleReminder()"><i class="fas fa-chevron-down"></i> Lihat semua jadwal perawatan</button>
+<div id="remFullList" class="rem-full-list" style="display:none;"></div>
+</div>
+</main></div>
 
-    <!-- ═══ DASHBOARD ═══ -->
-    <div class="card">
-        <div class="card-title"><i class="fas fa-wallet"></i> Keuangan Bulan Ini</div>
-        <div class="fin-row">
-            <div class="fin-chip">
-                <div class="fin-label">Rutin</div>
-                <div class="fin-value" id="totalHarian">Rp 0</div>
-                <div class="fin-sub" id="budgetSub">–</div>
-                <div class="prog-wrap"><div class="prog-bar" id="budgetBar" style="width:0%"></div></div>
-            </div>
-            <div class="fin-chip">
-                <div class="fin-label">Servis & Part</div>
-                <div class="fin-value orange" id="totalServis">Rp 0</div>
-                <div class="fin-sub">insidental</div>
-            </div>
-            <div class="fin-chip full">
-                <div class="fin-label">Atur Budget Bulanan</div>
-                <div class="budget-row">
-                    <input class="budget-inp" type="number" id="budgetInp" placeholder="420000">
-                    <button class="budget-save" onclick="saveBudget()">Simpan</button>
-                </div>
-            </div>
-        </div>
-    </div>
+<!-- TAB KONDISI PART -->
+<div class="page" id="page-kondisi"><main>
+<div class="card">
+<div class="card-title"><i class="fas fa-clipboard-check"></i> Kondisi Part Motor</div>
+<p style="font-size:12px;color:var(--text-sub);margin-bottom:14px;line-height:1.6;">Gunakan halaman ini saat di bengkel untuk mengecek apakah part yang disarankan mekanik memang sudah waktunya diganti.</p>
+<div class="part-motor-tabs"><div class="part-mtab active" id="partTab_BeatDLX" onclick="setPartTab('BeatDLX')">🏍 Beat Deluxe</div><div class="part-mtab" id="partTab_BeatPop" onclick="setPartTab('BeatPop')">🏍 Beat Pop</div></div>
+<div class="odo-info"><span>Odometer saat ini</span><strong id="partOdoVal">– KM</strong></div>
+<div id="partList"></div>
+</div>
+</main></div>
 
-    <!-- ═══ FORM INPUT ═══ -->
-    <div class="card">
-        <div class="card-title"><i class="fas fa-plus-circle"></i> Catat Aktivitas</div>
+<!-- TAB RIWAYAT -->
+<div class="page" id="page-riwayat"><main>
+<div class="card">
+<div class="card-title"><i class="fas fa-calendar-days"></i> Riwayat Aktivitas</div>
+<div class="cal-nav">
+<button class="cal-nav-btn" onclick="calPrev()"><i class="fas fa-chevron-left"></i></button>
+<div class="cal-month-label" id="calMonthLabel">–</div>
+<button class="cal-nav-btn" onclick="calNext()"><i class="fas fa-chevron-right"></i></button>
+</div>
+<div class="cal-header"><span>Min</span><span>Sen</span><span>Sel</span><span>Rab</span><span>Kam</span><span>Jum</span><span>Sab</span></div>
+<div class="cal-grid" id="calGrid"></div>
+<div id="dayPopup" style="display:none;"></div>
+<button class="full-hist-btn" onclick="toggleFullHist()"><i class="fas fa-list" id="fullHistIcon"></i> <span id="fullHistLabel">Lihat semua riwayat</span></button>
+<div class="full-hist-panel" id="fullHistPanel">
+<div class="hist-filters">
+<select class="hist-filter" id="fMotor" onchange="renderFullHist()"><option value="semua">Semua Motor</option><option value="BeatDLX">Beat Deluxe</option><option value="BeatPop">Beat Pop</option></select>
+<select class="hist-filter" id="fType" onchange="renderFullHist()"><option value="semua">Semua Jenis</option><option value="harian">Harian/Rutin</option><option value="servis">Servis/Part</option></select>
+</div>
+<div id="fullHistList"></div><div id="fullHistPager"></div>
+</div>
+<button class="export-btn" onclick="exportCSV()"><i class="fas fa-file-arrow-down"></i> Export Data ke CSV</button>
+<button class="del-btn" onclick="showResetModal()"><i class="fas fa-trash-can"></i> Reset Semua Data</button>
+</div>
+</main></div>
 
-        <div class="field">
-            <label class="field-label">Motor</label>
-            <div class="sel-wrap">
-                <select class="inp" id="motorSel" onchange="updateOdoPlaceholder()">
-                    <option value="BeatDLX">Beat Deluxe</option>
-                    <option value="BeatPop">Beat Pop</option>
-                </select>
-            </div>
-        </div>
-
-        <div class="field grid-2">
-            <div>
-                <label class="field-label">Tanggal</label>
-                <div class="sel-wrap"><select class="inp" id="inputTgl"></select></div>
-            </div>
-            <div>
-                <label class="field-label">Bulan</label>
-                <div class="sel-wrap"><select class="inp" id="inputBln"></select></div>
-            </div>
-        </div>
-
-        <div class="field">
-            <label class="field-label">Odometer Saat Ini (KM)</label>
-            <input class="inp" type="number" id="odoInp" placeholder="Input KM sekarang">
-        </div>
-
-        <div class="field">
-            <label class="field-label">Jenis Catatan</label>
-            <div class="type-toggle">
-                <button class="type-btn active" id="btnHarian" onclick="setType('harian')">
-                    <i class="fas fa-gas-pump"></i> Harian / Rutin
-                </button>
-                <button class="type-btn" id="btnServis" onclick="setType('servis')">
-                    <i class="fas fa-wrench"></i> Servis / Part
-                </button>
-            </div>
-        </div>
-
-        <!-- Harian -->
-        <div id="harianFields">
-            <div class="field">
-                <label class="field-label">Kategori</label>
-                <div class="sel-wrap">
-                    <select class="inp" id="katHarian" onchange="autoFill()">
-                        <option value="Bensin">⛽ Bensin</option>
-                        <option value="Isi Angin">💨 Isi Angin Ban</option>
-                        <option value="Tambal Ban">🔧 Tambal Ban</option>
-                        <option value="Cuci Motor">🚿 Cuci Motor</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        <!-- Servis -->
-        <div id="servisFields" style="display:none;">
-            <div class="field">
-                <label class="field-label">Part / Jenis Servis</label>
-                <div class="sel-wrap">
-                    <select class="inp" id="katServis" onchange="onServisChange()">
-                        <optgroup label="🛢️ Fluida">
-                            <option value="Oli Mesin">Oli Mesin</option>
-                            <option value="Oli Gardan">Oli Gardan (Transmisi)</option>
-                            <option value="Minyak Rem">Minyak Rem</option>
-                        </optgroup>
-                        <optgroup label="⚙️ Servis Berkala">
-                            <option value="Servis CVT">Servis CVT</option>
-                            <option value="Servis Injeksi (FI Cleaning)">Servis Injeksi (FI Cleaning)</option>
-                            <option value="Tune Up">Tune Up</option>
-                        </optgroup>
-                        <optgroup label="🔩 Part CVT">
-                            <option value="V-Belt">V-Belt</option>
-                            <option value="Roller CVT">Roller CVT</option>
-                            <option value="Kampas Ganda">Kampas Ganda</option>
-                            <option value="Slider / Per CVT">Slider / Per CVT</option>
-                        </optgroup>
-                        <optgroup label="🛑 Pengereman">
-                            <option value="Kampas Rem Depan">Kampas Rem Depan</option>
-                            <option value="Kampas Rem Belakang">Kampas Rem Belakang</option>
-                        </optgroup>
-                        <optgroup label="🔌 Pengapian & Filter">
-                            <option value="Busi">Busi</option>
-                            <option value="Filter Udara">Filter Udara</option>
-                        </optgroup>
-                        <optgroup label="🔋 Kelistrikan & Lampu">
-                            <option value="Aki / Baterai">Aki / Baterai</option>
-                            <option value="Lampu Depan (Headlamp)">Lampu Depan (Headlamp)</option>
-                            <option value="Lampu Belakang / Stop Lamp">Lampu Belakang / Stop Lamp</option>
-                            <option value="Lampu Sein Kiri">Lampu Sein Kiri</option>
-                            <option value="Lampu Sein Kanan">Lampu Sein Kanan</option>
-                        </optgroup>
-                        <optgroup label="🛞 Ban">
-                            <option value="Ban Depan">Ban Depan (Ganti)</option>
-                            <option value="Ban Belakang">Ban Belakang (Ganti)</option>
-                        </optgroup>
-                        <optgroup label="📝 Lainnya">
-                            <option value="Lainnya">Lainnya (isi manual)</option>
-                        </optgroup>
-                    </select>
-                </div>
-            </div>
-
-            <div id="oilBox" style="display:none;" class="field">
-                <label class="field-label">Jenis Oli Mesin</label>
-                <div class="sel-wrap">
-                    <select class="inp" id="jenisOli">
-                        <option value="2000">Oli Standar (interval 2.000 KM)</option>
-                        <option value="5000">X-TEN Ester Synthetic – Planet Ban (interval 5.000 KM)</option>
-                    </select>
-                </div>
-            </div>
-
-            <div id="lainnyaBox" style="display:none;" class="field">
-                <label class="field-label">Keterangan Part / Servis</label>
-                <input class="inp" type="text" id="lainnyaInp" placeholder="Contoh: Seal Pulley, Per Kampas...">
-            </div>
-        </div>
-
-        <div class="field">
-            <label class="field-label">Biaya (Rp)</label>
-            <input class="inp" type="number" id="biayaInp" placeholder="Contoh: 40000">
-        </div>
-
-        <button class="submit-btn" id="submitBtn" onclick="submitRecord()">
-            Simpan Catatan
-        </button>
-    </div>
-
-    <!-- ═══ KONDISI MOTOR ═══ -->
-    <div class="card">
-        <div class="card-title"><i class="fas fa-gauge-high"></i> Kondisi & Jadwal Perawatan</div>
-        <div class="motor-tabs">
-            <div class="mtab active" id="remTab_BeatDLX" onclick="setRemTab('BeatDLX')">🏍 Beat Deluxe</div>
-            <div class="mtab" id="remTab_BeatPop" onclick="setRemTab('BeatPop')">🏍 Beat Pop</div>
-        </div>
-        <div id="remSummary" class="rem-summary"></div>
-        <button class="expand-btn" id="expandBtn" onclick="toggleReminder()">
-            <i class="fas fa-chevron-down"></i> Lihat semua jadwal perawatan
-        </button>
-        <div id="remFullList" class="rem-full-list" style="display:none;"></div>
-    </div>
-
-    <!-- ═══ RIWAYAT (KALENDER) ═══ -->
-    <div class="card">
-        <div class="card-title"><i class="fas fa-calendar-days"></i> Riwayat Aktivitas</div>
-        <div class="cal-nav">
-            <button class="cal-nav-btn" onclick="calPrev()"><i class="fas fa-chevron-left"></i></button>
-            <div class="cal-month-label" id="calMonthLabel">–</div>
-            <button class="cal-nav-btn" onclick="calNext()"><i class="fas fa-chevron-right"></i></button>
-        </div>
-        <div class="cal-header">
-            <span>Min</span><span>Sen</span><span>Sel</span><span>Rab</span>
-            <span>Kam</span><span>Jum</span><span>Sab</span>
-        </div>
-        <div class="cal-grid" id="calGrid"></div>
-        <div id="dayPopup" style="display:none;"></div>
-
-        <button class="full-hist-btn" onclick="toggleFullHist()">
-            <i class="fas fa-list" id="fullHistIcon"></i>
-            <span id="fullHistLabel">Lihat semua riwayat</span>
-        </button>
-
-        <div class="full-hist-panel" id="fullHistPanel">
-            <div class="hist-filters">
-                <select class="hist-filter" id="fMotor" onchange="renderFullHist()">
-                    <option value="semua">Semua Motor</option>
-                    <option value="BeatDLX">Beat Deluxe</option>
-                    <option value="BeatPop">Beat Pop</option>
-                </select>
-                <select class="hist-filter" id="fType" onchange="renderFullHist()">
-                    <option value="semua">Semua Jenis</option>
-                    <option value="harian">Harian/Rutin</option>
-                    <option value="servis">Servis/Part</option>
-                </select>
-            </div>
-            <div id="fullHistList"></div>
-            <div id="fullHistPager"></div>
-        </div>
-
-        <button class="export-btn" onclick="exportCSV()">
-            <i class="fas fa-file-arrow-down"></i> Export Data ke CSV
-        </button>
-        <button class="del-btn" onclick="showResetModal()">
-            <i class="fas fa-trash-can"></i> Reset Semua Data
-        </button>
-    </div>
-
-</main>
-
+<nav class="bottom-nav">
+<button class="nav-item active" id="nav-beranda" onclick="switchTab('beranda')"><i class="fas fa-house"></i><span>Beranda</span></button>
+<button class="nav-item" id="nav-kondisi" onclick="switchTab('kondisi')"><i class="fas fa-clipboard-check"></i><span>Kondisi Part</span></button>
+<button class="nav-item" id="nav-riwayat" onclick="switchTab('riwayat')"><i class="fas fa-calendar-days"></i><span>Riwayat</span></button>
+</nav>
 <div class="toast" id="toast"></div>
-
 <div class="modal-overlay" id="resetModal">
-    <div class="modal">
-        <div class="modal-icon">⚠️</div>
-        <div class="modal-title">Reset Data?</div>
-        <div class="modal-body">
-            Semua data transaksi dan odometer akan <strong>dihapus permanen</strong>. Disarankan ekspor backup terlebih dahulu.
-        </div>
-        <div class="modal-btns" style="flex-direction:column; gap:8px;">
-            <button class="mbtn export" onclick="exportAndReset()">
-                <i class="fas fa-file-export"></i> Ekspor Backup lalu Reset
-            </button>
-            <button class="mbtn danger" onclick="doReset()">Reset Tanpa Backup</button>
-            <button class="mbtn cancel" onclick="closeModal()">Batal</button>
-        </div>
-    </div>
+<div class="modal">
+<div class="modal-icon">⚠️</div><div class="modal-title">Reset Data?</div>
+<div class="modal-body">Semua data transaksi dan odometer akan <strong>dihapus permanen</strong>. Disarankan ekspor backup terlebih dahulu.</div>
+<div class="modal-btns" style="flex-direction:column;gap:8px;">
+<button class="mbtn export" onclick="exportAndReset()"><i class="fas fa-file-export"></i> Ekspor Backup lalu Reset</button>
+<button class="mbtn danger" onclick="doReset()">Reset Tanpa Backup</button>
+<button class="mbtn cancel" onclick="closeModal()">Batal</button>
+</div>
+</div>
 </div>
 
 <script>
-// ════════════════════════════════════════════════════════
-//  CONSTANTS
-// ════════════════════════════════════════════════════════
-const MOTOR_NAMES = { BeatDLX: 'Beat Deluxe', BeatPop: 'Beat Pop' };
-const BULAN = ['Januari','Februari','Maret','April','Mei','Juni',
-               'Juli','Agustus','September','Oktober','November','Desember'];
-const TAHUN = 2026;
+const MOTOR_NAMES={BeatDLX:'Beat Deluxe',BeatPop:'Beat Pop'};
+const BULAN=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+const TAHUN=2026;
+const INTERVALS={'Oli Mesin':2000,'Oli Gardan':8000,'Minyak Rem':20000,'Servis CVT':8000,'Servis Injeksi (FI Cleaning)':10000,'Tune Up':20000,'V-Belt':24000,'Roller CVT':20000,'Kampas Ganda':20000,'Slider / Per CVT':20000,'Kampas Rem Depan':20000,'Kampas Rem Belakang':20000,'Busi':8000,'Filter Udara':10000,'Aki / Baterai':35000,'Ban Depan':12000,'Ban Belakang':12000};
+const PART_ADVICE={'Oli Mesin':'Ganti rutin sesuai interval. Oli yang terlambat diganti mempercepat keausan mesin.','Oli Gardan':'Sering terlupakan. Ganti setiap 2x ganti oli mesin atau sesuai KM.','Servis CVT':'CVT kotor menyebabkan akselerasi berat dan boros BBM.','V-Belt':'Jika ada bunyi mendecit atau akselerasi terasa slip, segera cek meski belum waktunya.','Roller CVT':'Roller gepeng/oval menyebabkan akselerasi tidak mulus dan motor bergetar.','Kampas Ganda':'Jika motor selip saat gas dibuka, kampas ganda kemungkinan sudah aus.','Busi':'Busi aus menyebabkan mesin susah start dan boros BBM.','Filter Udara':'Filter kotor membuat campuran BBM-udara tidak ideal.','Kampas Rem Depan':'Jika rem kurang pakem atau ada bunyi berdecit, segera cek.','Kampas Rem Belakang':'Jangan tunggu habis baru ganti.','Aki / Baterai':'Aki lemah ditandai starter elektrik lambat atau lampu redup.'};
+let STATE={trx:[],maint:{BeatDLX:{},BeatPop:{}},odo:{BeatDLX:0,BeatPop:0},budget:420000};
+let recordType='harian',remTab='BeatDLX',partTab='BeatDLX',remExpanded=false;
+let calYear=TAHUN,calMonth=new Date().getMonth(),selectedDay=null,histPage=1,fullHistOpen=false,alertDismissed=false;
+const HPP=10;
 
-const INTERVALS = {
-    'Oli Mesin': 2000, 'Oli Gardan': 8000, 'Minyak Rem': 20000,
-    'Servis CVT': 8000, 'Servis Injeksi (FI Cleaning)': 10000, 'Tune Up': 20000,
-    'V-Belt': 24000, 'Roller CVT': 20000, 'Kampas Ganda': 20000, 'Slider / Per CVT': 20000,
-    'Kampas Rem Depan': 20000, 'Kampas Rem Belakang': 20000,
-    'Busi': 8000, 'Filter Udara': 10000,
-    'Aki / Baterai': 35000,
-    'Ban Depan': 12000, 'Ban Belakang': 12000,
-};
-
-// ════════════════════════════════════════════════════════
-//  IN-MEMORY STATE (cache dari Firestore)
-// ════════════════════════════════════════════════════════
-let STATE = {
-    trx:    [],   // array of transaction objects
-    maint:  { BeatDLX: {}, BeatPop: {} },
-    odo:    { BeatDLX: 0,  BeatPop: 0  },
-    budget: 420000
-};
-
-let recordType   = 'harian';
-let remTab       = 'BeatDLX';
-let remExpanded  = false;
-let calYear      = TAHUN;
-let calMonth     = new Date().getMonth();
-let selectedDay  = null;
-let histPage     = 1;
-let fullHistOpen = false;
-const HIST_PER_PAGE = 10;
-
-// ════════════════════════════════════════════════════════
-//  SYNC INDICATOR
-// ════════════════════════════════════════════════════════
-function setSyncStatus(status) {
-    const dot = document.getElementById('syncDot');
-    dot.className = 'sync-indicator' + (status === 'syncing' ? ' syncing' : status === 'error' ? ' error' : '');
+function switchTab(t){
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+    document.getElementById('page-'+t).classList.add('active');
+    document.getElementById('nav-'+t).classList.add('active');
+    if(t==='kondisi') renderPartPage();
+    if(t==='riwayat') renderCalendar();
 }
 
-// ════════════════════════════════════════════════════════
-//  INIT — tunggu Firebase siap
-// ════════════════════════════════════════════════════════
-async function init() {
-    // Tunggu Firebase module selesai load
-    if (!window._fsReady) {
-        await new Promise(r => document.addEventListener('fs-ready', r, { once: true }));
-    }
+function setSyncStatus(s){const d=document.getElementById('syncDot');d.className='sync-dot'+(s==='syncing'?' syncing':s==='error'?' error':'');}
 
+async function init(){
+    if(!window._fsReady) await new Promise(r=>document.addEventListener('fs-ready',r,{once:true}));
     setSyncStatus('syncing');
-    try {
-        // Load settings (odo, maint, budget)
-        const settings = await window._fs.fsGetSettings();
-        if (settings.odo)    STATE.odo    = settings.odo;
-        if (settings.maint)  STATE.maint  = settings.maint;
-        if (settings.budget) STATE.budget = settings.budget;
-
-        // Load transactions
-        STATE.trx = await window._fs.fsGetTrx();
-
+    try{
+        const s=await window._fs.fsGetSettings();
+        if(s.odo) STATE.odo=s.odo; if(s.maint) STATE.maint=s.maint; if(s.budget) STATE.budget=s.budget;
+        STATE.trx=await window._fs.fsGetTrx();
         setSyncStatus('ok');
-    } catch(e) {
-        setSyncStatus('error');
-        toast('⚠️ Gagal memuat data. Cek koneksi internet.');
-    }
-
+    }catch(e){setSyncStatus('error');toast('⚠️ Gagal memuat data.');}
     populateDatePickers();
-    document.getElementById('budgetInp').value = STATE.budget;
-    updateOdoPlaceholder();
-    updateDashboard();
-    renderReminder();
-    renderCalendar();
-
-    document.getElementById('loadingOverlay').style.display = 'none';
+    document.getElementById('budgetInp').value=STATE.budget;
+    updateOdoPlaceholder(); updateDashboard(); renderReminder(); renderCalendar(); showAlertBanner();
+    document.getElementById('loadingOverlay').style.display='none';
 }
 
-// ════════════════════════════════════════════════════════
-//  SAVE SETTINGS TO FIRESTORE
-// ════════════════════════════════════════════════════════
-async function saveSettings() {
+async function saveSettings(){
     setSyncStatus('syncing');
-    try {
-        await window._fs.fsSetSettings({
-            odo:    STATE.odo,
-            maint:  STATE.maint,
-            budget: STATE.budget
+    try{await window._fs.fsSetSettings({odo:STATE.odo,maint:STATE.maint,budget:STATE.budget});setSyncStatus('ok');}
+    catch(e){setSyncStatus('error');toast('⚠️ Gagal menyimpan ke cloud.');}
+}
+
+function showAlertBanner(){
+    if(alertDismissed) return;
+    const el=document.getElementById('alertBanner');
+    let overdue=[],warning=[];
+    ['BeatDLX','BeatPop'].forEach(motor=>{
+        const maint=STATE.maint[motor]||{},odo=STATE.odo[motor]||0;
+        if(!odo) return;
+        Object.entries(maint).forEach(([part,d])=>{
+            const sisa=(d.lastOdo+d.interval)-odo;
+            const label=MOTOR_NAMES[motor]+' — '+part;
+            if(sisa<=0) overdue.push({label,sisa}); else if(sisa<=500) warning.push({label,sisa});
         });
-        setSyncStatus('ok');
-    } catch(e) {
-        setSyncStatus('error');
-        toast('⚠️ Gagal menyimpan ke cloud. Cek koneksi.');
-    }
-}
-
-// ════════════════════════════════════════════════════════
-//  DATE PICKERS
-// ════════════════════════════════════════════════════════
-function populateDatePickers() {
-    const today = new Date();
-    const tgl = document.getElementById('inputTgl');
-    const bln = document.getElementById('inputBln');
-
-    tgl.innerHTML = '';
-    for (let d = 1; d <= 31; d++) {
-        const o = document.createElement('option');
-        o.value = d; o.textContent = d;
-        if (d === today.getDate()) o.selected = true;
-        tgl.appendChild(o);
-    }
-
-    bln.innerHTML = '';
-    BULAN.forEach((b, i) => {
-        const o = document.createElement('option');
-        o.value = i + 1; o.textContent = b;
-        if (i === today.getMonth()) o.selected = true;
-        bln.appendChild(o);
     });
-}
-
-function getSelectedDate() {
-    const d = String(document.getElementById('inputTgl').value).padStart(2, '0');
-    const m = String(document.getElementById('inputBln').value).padStart(2, '0');
-    return `${TAHUN}-${m}-${d}`;
-}
-
-// ════════════════════════════════════════════════════════
-//  FORM LOGIC
-// ════════════════════════════════════════════════════════
-function setType(t) {
-    recordType = t;
-    document.getElementById('btnHarian').className = 'type-btn' + (t === 'harian' ? ' active' : '');
-    document.getElementById('btnServis').className = 'type-btn' + (t === 'servis' ? ' active' : '');
-    document.getElementById('harianFields').style.display = t === 'harian' ? 'block' : 'none';
-    document.getElementById('servisFields').style.display = t === 'servis' ? 'block' : 'none';
-    document.getElementById('biayaInp').value = '';
-    if (t === 'harian') autoFill();
-}
-
-function autoFill() {
-    const map = { 'Isi Angin': 3000, 'Tambal Ban': 15000, 'Cuci Motor': 13000 };
-    const v = document.getElementById('katHarian').value;
-    document.getElementById('biayaInp').value = map[v] || '';
-}
-
-function onServisChange() {
-    const v = document.getElementById('katServis').value;
-    document.getElementById('oilBox').style.display     = v === 'Oli Mesin' ? 'block' : 'none';
-    document.getElementById('lainnyaBox').style.display = v === 'Lainnya'   ? 'block' : 'none';
-    if (v !== 'Lainnya') document.getElementById('lainnyaInp').value = '';
-}
-
-function updateOdoPlaceholder() {
-    const motor = document.getElementById('motorSel').value;
-    const odo   = STATE.odo[motor] || 0;
-    const inp   = document.getElementById('odoInp');
-    inp.placeholder = odo > 0 ? `Terakhir: ${odo.toLocaleString('id')} KM` : 'Input KM sekarang';
-    inp.value       = odo > 0 ? odo : '';
-}
-
-// ════════════════════════════════════════════════════════
-//  SUBMIT
-// ════════════════════════════════════════════════════════
-async function submitRecord() {
-    const motor  = document.getElementById('motorSel').value;
-    const odoRaw = document.getElementById('odoInp').value;
-    const biaya  = parseInt(document.getElementById('biayaInp').value);
-    const date   = getSelectedDate();
-
-    if (!odoRaw) { toast('⚠️ Odometer wajib diisi'); return; }
-    if (!biaya || biaya < 0) { toast('⚠️ Biaya tidak valid'); return; }
-
-    const odo = parseInt(odoRaw);
-    if (odo < STATE.odo[motor] && STATE.odo[motor] > 0) {
-        toast(`⚠️ Odo harus ≥ ${STATE.odo[motor].toLocaleString('id')} KM`); return;
+    if(!overdue.length&&!warning.length){el.style.display='none';return;}
+    let html='';
+    if(overdue.length){
+        html+='<div class="alert-banner"><button class="alert-close" onclick="dismissAlert()"><i class="fas fa-times"></i></button><div class="alert-title"><i class="fas fa-triangle-exclamation"></i> Segera Perlu Perhatian!</div>';
+        overdue.forEach(i=>{html+='<div class="alert-row"><span class="alert-part">'+i.label+'</span><span class="alert-val">Lewat '+Math.abs(i.sisa).toLocaleString('id')+' KM!</span></div>';});
+        html+='</div>';
     }
-
-    let cat = '';
-    if (recordType === 'harian') {
-        cat = document.getElementById('katHarian').value;
-    } else {
-        cat = document.getElementById('katServis').value;
-        if (cat === 'Lainnya') {
-            const manual = document.getElementById('lainnyaInp').value.trim();
-            if (!manual) { toast('⚠️ Isi keterangan untuk "Lainnya"'); return; }
-            cat = manual;
-        }
-        let interval = INTERVALS[cat] || 0;
-        if (cat === 'Oli Mesin') interval = parseInt(document.getElementById('jenisOli').value);
-        if (interval > 0) {
-            if (!STATE.maint[motor]) STATE.maint[motor] = {};
-            STATE.maint[motor][cat] = { lastOdo: odo, interval };
-        }
+    if(warning.length){
+        html+='<div class="alert-banner warn">'+(!overdue.length?'<button class="alert-close" onclick="dismissAlert()"><i class="fas fa-times"></i></button>':'')+'<div class="alert-title"><i class="fas fa-clock"></i> Akan Segera Jatuh Tempo</div>';
+        warning.forEach(i=>{html+='<div class="alert-row"><span class="alert-part">'+i.label+'</span><span class="alert-val">'+i.sisa.toLocaleString('id')+' KM lagi</span></div>';});
+        html+='</div>';
     }
+    el.innerHTML=html; el.style.display='block';
+}
+function dismissAlert(){alertDismissed=true;document.getElementById('alertBanner').style.display='none';}
 
-    // Update odo
-    STATE.odo[motor] = odo;
+function populateDatePickers(){
+    const today=new Date(),tgl=document.getElementById('inputTgl'),bln=document.getElementById('inputBln');
+    tgl.innerHTML=''; for(let d=1;d<=31;d++){const o=document.createElement('option');o.value=d;o.textContent=d;if(d===today.getDate())o.selected=true;tgl.appendChild(o);}
+    bln.innerHTML=''; BULAN.forEach((b,i)=>{const o=document.createElement('option');o.value=i+1;o.textContent=b;if(i===today.getMonth())o.selected=true;bln.appendChild(o);});
+}
+function getSelectedDate(){const d=String(document.getElementById('inputTgl').value).padStart(2,'0'),m=String(document.getElementById('inputBln').value).padStart(2,'0');return TAHUN+'-'+m+'-'+d;}
 
-    // Disable button while saving
-    const btn = document.getElementById('submitBtn');
-    btn.disabled = true;
-    btn.textContent = 'Menyimpan...';
+function setType(t){
+    recordType=t;
+    document.getElementById('btnHarian').className='type-btn'+(t==='harian'?' active':'');
+    document.getElementById('btnServis').className='type-btn'+(t==='servis'?' active':'');
+    document.getElementById('harianFields').style.display=t==='harian'?'block':'none';
+    document.getElementById('servisFields').style.display=t==='servis'?'block':'none';
+    document.getElementById('biayaInp').value='';
+    if(t==='harian') autoFill();
+}
+function autoFill(){const map={'Isi Angin':3000,'Tambal Ban':15000,'Cuci Motor':13000};document.getElementById('biayaInp').value=map[document.getElementById('katHarian').value]||'';}
+function onServisChange(){const v=document.getElementById('katServis').value;document.getElementById('oilBox').style.display=v==='Oli Mesin'?'block':'none';document.getElementById('lainnyaBox').style.display=v==='Lainnya'?'block':'none';if(v!=='Lainnya')document.getElementById('lainnyaInp').value='';}
+function updateOdoPlaceholder(){const motor=document.getElementById('motorSel').value,odo=STATE.odo[motor]||0,inp=document.getElementById('odoInp');inp.placeholder=odo>0?'Terakhir: '+odo.toLocaleString('id')+' KM':'Input KM sekarang';inp.value=odo>0?odo:'';}
 
-    try {
-        // Save transaction to Firestore
-        const trxObj = { date, motor, type: recordType, category: cat, nominal: biaya, odo, createdAt: Date.now() };
-        const newId  = await window._fs.fsAddTrx(trxObj);
-        STATE.trx.push({ ...trxObj, _id: newId });
-
-        // Save settings (odo + maint)
+async function submitRecord(){
+    const motor=document.getElementById('motorSel').value,odoRaw=document.getElementById('odoInp').value,biaya=parseInt(document.getElementById('biayaInp').value),date=getSelectedDate();
+    if(!odoRaw){toast('⚠️ Odometer wajib diisi');return;}
+    if(!biaya||biaya<0){toast('⚠️ Biaya tidak valid');return;}
+    const odo=parseInt(odoRaw);
+    if(odo<STATE.odo[motor]&&STATE.odo[motor]>0){toast('⚠️ Odo harus >= '+STATE.odo[motor].toLocaleString('id')+' KM');return;}
+    let cat='';
+    if(recordType==='harian'){cat=document.getElementById('katHarian').value;}
+    else{
+        cat=document.getElementById('katServis').value;
+        if(cat==='Lainnya'){const m=document.getElementById('lainnyaInp').value.trim();if(!m){toast('⚠️ Isi keterangan untuk Lainnya');return;}cat=m;}
+        let interval=INTERVALS[cat]||0;
+        if(cat==='Oli Mesin') interval=parseInt(document.getElementById('jenisOli').value);
+        if(interval>0){if(!STATE.maint[motor])STATE.maint[motor]={};STATE.maint[motor][cat]={lastOdo:odo,interval};}
+    }
+    STATE.odo[motor]=odo;
+    const btn=document.getElementById('submitBtn');btn.disabled=true;btn.textContent='Menyimpan...';
+    try{
+        const trxObj={date,motor,type:recordType,category:cat,nominal:biaya,odo,createdAt:Date.now()};
+        const newId=await window._fs.fsAddTrx(trxObj);
+        STATE.trx.push({...trxObj,_id:newId});
         await saveSettings();
+        document.getElementById('biayaInp').value='';
+        updateOdoPlaceholder();updateDashboard();renderReminder();renderCalendar();
+        alertDismissed=false;showAlertBanner();
+        if(fullHistOpen) renderFullHist();
+        btn.textContent='✅ Tersimpan!';btn.classList.add('ok');
+        setTimeout(()=>{btn.textContent='Simpan Catatan';btn.classList.remove('ok');btn.disabled=false;},2000);
+    }catch(e){toast('⚠️ Gagal menyimpan. Cek koneksi internet.');btn.textContent='Simpan Catatan';btn.disabled=false;}
+}
 
-        document.getElementById('biayaInp').value = '';
-        updateOdoPlaceholder();
-        updateDashboard();
-        renderReminder();
-        renderCalendar();
-        if (fullHistOpen) renderFullHist();
+async function saveBudget(){const v=parseInt(document.getElementById('budgetInp').value);if(!v||v<1000){toast('⚠️ Masukkan budget yang valid');return;}STATE.budget=v;await saveSettings();updateDashboard();toast('✅ Budget disimpan!',true);}
 
-        btn.textContent = '✅ Tersimpan!';
-        btn.classList.add('ok');
-        setTimeout(() => { btn.textContent = 'Simpan Catatan'; btn.classList.remove('ok'); btn.disabled = false; }, 2000);
-    } catch(e) {
-        toast('⚠️ Gagal menyimpan. Cek koneksi internet.');
-        btn.textContent = 'Simpan Catatan';
-        btn.disabled = false;
+function updateDashboard(){
+    document.getElementById('currentMonthYear').textContent=BULAN[new Date().getMonth()]+' '+TAHUN;
+    const now=new Date();let h=0,s=0;
+    STATE.trx.forEach(t=>{const d=new Date(t.date);if(d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()){if(t.type==='harian')h+=parseInt(t.nominal);else s+=parseInt(t.nominal);}});
+    const budget=STATE.budget,sisa=budget-h;
+    document.getElementById('totalHarian').textContent=rp(h);document.getElementById('totalServis').textContent=rp(s);
+    const sub=document.getElementById('budgetSub');
+    if(sisa<0){sub.textContent='Overbudget '+rp(Math.abs(sisa));sub.style.color='var(--red)';}
+    else{sub.textContent='Sisa '+rp(sisa)+' dari '+rp(budget);sub.style.color='';}
+    let pct=Math.min((h/budget)*100,100);
+    const bar=document.getElementById('budgetBar');bar.style.width=pct+'%';
+    bar.style.background=pct>90?'var(--red)':pct>70?'var(--yellow)':'var(--accent)';
+}
+
+function setRemTab(m){remTab=m;document.querySelectorAll('.mtab').forEach(b=>b.classList.remove('active'));document.getElementById('remTab_'+m).classList.add('active');renderReminder();}
+function toggleReminder(){remExpanded=!remExpanded;document.getElementById('remFullList').style.display=remExpanded?'block':'none';const btn=document.getElementById('expandBtn');btn.innerHTML=remExpanded?'<i class="fas fa-chevron-up"></i> Sembunyikan jadwal lengkap':'<i class="fas fa-chevron-down"></i> Lihat semua jadwal perawatan';if(remExpanded)renderRemFull();}
+
+function renderReminder(){
+    const maint=STATE.maint[remTab]||{},odo=STATE.odo[remTab]||0,summEl=document.getElementById('remSummary');
+    summEl.innerHTML='';
+    if(!odo||!Object.keys(maint).length){summEl.innerHTML='<div class="empty"><i class="fas fa-wrench"></i>Belum ada data. Catat servis pertama!</div>';document.getElementById('expandBtn').style.display='none';return;}
+    document.getElementById('expandBtn').style.display='block';
+    const items=Object.entries(maint).map(([part,d])=>({part,d,sisa:(d.lastOdo+d.interval)-odo})).sort((a,b)=>a.sisa-b.sisa);
+    items.slice(0,3).forEach(({part,sisa})=>{
+        let cls,val;
+        if(sisa<=0){cls='chip-danger';val='Lewat '+Math.abs(sisa).toLocaleString('id')+' KM';}
+        else if(sisa<=500){cls='chip-warn';val=sisa.toLocaleString('id')+' KM lagi';}
+        else{cls='chip-ok';val=sisa.toLocaleString('id')+' KM lagi';}
+        summEl.innerHTML+='<div class="rem-chip '+cls+'"><div class="rem-chip-dot"></div><div class="rem-chip-name">'+part+'</div><div class="rem-chip-val">'+val+'</div></div>';
+    });
+    if(remExpanded) renderRemFull();
+}
+
+function renderRemFull(){
+    const maint=STATE.maint[remTab]||{},odo=STATE.odo[remTab]||0,el=document.getElementById('remFullList');
+    el.innerHTML='';
+    const items=Object.entries(maint).map(([part,d])=>({part,d,target:d.lastOdo+d.interval,sisa:(d.lastOdo+d.interval)-odo})).sort((a,b)=>a.sisa-b.sisa);
+    items.forEach(({part,d,target,sisa})=>{
+        let dc,bs,bt;
+        if(sisa<=0){dc='var(--red)';bs='background:var(--red-light);color:var(--red)';bt='⚠ Lewat '+Math.abs(sisa).toLocaleString('id')+' KM';}
+        else if(sisa<=500){dc='var(--yellow)';bs='background:var(--yellow-light);color:var(--yellow)';bt='⏳ '+sisa.toLocaleString('id')+' KM lagi';}
+        else{dc='var(--green)';bs='background:var(--green-light);color:var(--green)';bt='✓ '+sisa.toLocaleString('id')+' KM lagi';}
+        const pct=Math.min(Math.max(((odo-d.lastOdo)/d.interval)*100,0),100),barC=sisa<=0?'var(--red)':sisa<=500?'var(--yellow)':'var(--accent)';
+        el.innerHTML+='<div class="rem-row"><div class="rem-dot-col" style="background:'+dc+'"></div><div class="rem-info"><div class="rem-part">'+part+'</div><div class="rem-meta">Terakhir: '+d.lastOdo.toLocaleString('id')+' KM · Target: '+target.toLocaleString('id')+' KM</div><div class="rem-bar-bg" style="margin-top:5px;"><div class="rem-bar" style="width:'+pct+'%;background:'+barC+'"></div></div></div><div class="rem-badge" style="'+bs+'">'+bt+'</div></div>';
+    });
+}
+
+function setPartTab(m){partTab=m;document.querySelectorAll('.part-mtab').forEach(b=>b.classList.remove('active'));document.getElementById('partTab_'+m).classList.add('active');renderPartPage();}
+
+function renderPartPage(){
+    const maint=STATE.maint[partTab]||{},odo=STATE.odo[partTab]||0;
+    document.getElementById('partOdoVal').textContent=odo>0?odo.toLocaleString('id')+' KM':'– KM (belum ada data)';
+    const el=document.getElementById('partList');el.innerHTML='';
+    if(!odo||!Object.keys(maint).length){el.innerHTML='<div class="empty"><i class="fas fa-clipboard-check"></i>Belum ada data servis untuk '+MOTOR_NAMES[partTab]+'.<br>Catat servis pertama di tab Beranda!</div>';return;}
+    const items=Object.entries(maint).map(([part,d])=>{
+        const target=d.lastOdo+d.interval,sisa=target-odo,pct=Math.min(Math.max(((odo-d.lastOdo)/d.interval)*100,0),100);
+        return{part,d,target,sisa,pct};
+    }).sort((a,b)=>a.sisa-b.sisa);
+    items.forEach(({part,d,target,sisa,pct})=>{
+        let sc,bc,bt,barC;
+        if(sisa<=0){sc='status-danger';bc='badge-danger';bt='⚠ Lewat '+Math.abs(sisa).toLocaleString('id')+' KM';barC='var(--red)';}
+        else if(sisa<=500){sc='status-warn';bc='badge-warn';bt='⏳ '+sisa.toLocaleString('id')+' KM lagi';barC='var(--yellow)';}
+        else{sc='status-ok';bc='badge-ok';bt='✓ Aman — '+sisa.toLocaleString('id')+' KM lagi';barC='var(--green)';}
+        const lastTrx=[...STATE.trx].filter(t=>t.motor===partTab&&t.category===part).sort((a,b)=>b.date.localeCompare(a.date))[0];
+        const lastDate=lastTrx?fmtDate(lastTrx.date):'–';
+        const advice=PART_ADVICE[part]||'';
+        el.innerHTML+='<div class="part-card '+sc+'"><div class="part-card-top"><div class="part-name">'+part+'</div><div class="part-status-badge '+bc+'">'+bt+'</div></div><div class="part-info-grid"><div class="part-info-item"><div class="part-info-label">Terakhir diganti</div><div class="part-info-value">'+lastDate+'</div></div><div class="part-info-item"><div class="part-info-label">Pada odometer</div><div class="part-info-value">'+d.lastOdo.toLocaleString('id')+' KM</div></div><div class="part-info-item"><div class="part-info-label">Standar interval</div><div class="part-info-value">tiap '+d.interval.toLocaleString('id')+' KM</div></div><div class="part-info-item"><div class="part-info-label">Estimasi ganti berikutnya</div><div class="part-info-value">'+target.toLocaleString('id')+' KM</div></div></div><div class="part-prog-wrap"><div class="part-prog-bar" style="width:'+pct+'%;background:'+barC+'"></div></div>'+(advice?'<div class="part-advice">💡 '+advice+'</div>':'')+'</div>';
+    });
+}
+
+function calPrev(){calMonth--;if(calMonth<0){calMonth=11;calYear--;}selectedDay=null;renderCalendar();}
+function calNext(){calMonth++;if(calMonth>11){calMonth=0;calYear++;}selectedDay=null;renderCalendar();}
+function renderCalendar(){
+    document.getElementById('calMonthLabel').textContent=BULAN[calMonth]+' '+calYear;
+    const today=new Date(),txMap={};
+    STATE.trx.forEach(t=>{if(!txMap[t.date])txMap[t.date]={harian:false,servis:false};txMap[t.date][t.type]=true;});
+    const grid=document.getElementById('calGrid');grid.innerHTML='';
+    const firstDay=new Date(calYear,calMonth,1).getDay(),daysInMonth=new Date(calYear,calMonth+1,0).getDate();
+    for(let i=0;i<firstDay;i++) grid.innerHTML+='<div class="cal-day"></div>';
+    for(let d=1;d<=daysInMonth;d++){
+        const mm=String(calMonth+1).padStart(2,'0'),dd=String(d).padStart(2,'0'),dateStr=calYear+'-'+mm+'-'+dd;
+        const isToday=(d===today.getDate()&&calMonth===today.getMonth()&&calYear===today.getFullYear()),txInfo=txMap[dateStr];
+        let cls='cal-day cur-month';
+        if(isToday)cls+=' today';if(txInfo)cls+=' has-trx';if(selectedDay===dateStr)cls+=' selected';
+        let dots='';
+        if(txInfo){if(txInfo.harian)dots+='<div class="cal-dot dot-blue"></div>';if(txInfo.servis)dots+='<div class="cal-dot dot-orange"></div>';}
+        grid.innerHTML+='<div class="'+cls+'" '+(txInfo?'onclick="selectDay(\''+dateStr+'\')"':'')+'>'+d+(dots?'<div class="cal-dots">'+dots+'</div>':'')+'</div>';
     }
-}
-
-// ════════════════════════════════════════════════════════
-//  BUDGET / DASHBOARD
-// ════════════════════════════════════════════════════════
-async function saveBudget() {
-    const v = parseInt(document.getElementById('budgetInp').value);
-    if (!v || v < 1000) { toast('⚠️ Masukkan budget yang valid'); return; }
-    STATE.budget = v;
-    await saveSettings();
-    updateDashboard();
-    toast('✅ Budget disimpan!', true);
-}
-
-function updateDashboard() {
-    document.getElementById('currentMonthYear').textContent = BULAN[new Date().getMonth()] + ' ' + TAHUN;
-    const now = new Date();
-    let h = 0, s = 0;
-    STATE.trx.forEach(t => {
-        const d = new Date(t.date);
-        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
-            if (t.type === 'harian') h += parseInt(t.nominal);
-            else s += parseInt(t.nominal);
-        }
-    });
-
-    const budget = STATE.budget;
-    const sisa   = budget - h;
-    document.getElementById('totalHarian').textContent = rp(h);
-    document.getElementById('totalServis').textContent = rp(s);
-
-    const sub = document.getElementById('budgetSub');
-    if (sisa < 0) { sub.textContent = `Overbudget ${rp(Math.abs(sisa))}`; sub.style.color = 'var(--red)'; }
-    else { sub.textContent = `Sisa ${rp(sisa)} dari ${rp(budget)}`; sub.style.color = ''; }
-
-    let pct = Math.min((h / budget) * 100, 100);
-    const bar = document.getElementById('budgetBar');
-    bar.style.width = pct + '%';
-    bar.style.background = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--accent)';
-}
-
-// ════════════════════════════════════════════════════════
-//  REMINDER
-// ════════════════════════════════════════════════════════
-function setRemTab(m) {
-    remTab = m;
-    document.querySelectorAll('.mtab').forEach(b => b.classList.remove('active'));
-    document.getElementById('remTab_' + m).classList.add('active');
-    renderReminder();
-}
-
-function toggleReminder() {
-    remExpanded = !remExpanded;
-    document.getElementById('remFullList').style.display = remExpanded ? 'block' : 'none';
-    const btn = document.getElementById('expandBtn');
-    btn.innerHTML = remExpanded
-        ? '<i class="fas fa-chevron-up"></i> Sembunyikan jadwal lengkap'
-        : '<i class="fas fa-chevron-down"></i> Lihat semua jadwal perawatan';
-    if (remExpanded) renderRemFull();
-}
-
-function renderReminder() {
-    const maint = STATE.maint[remTab] || {};
-    const odo   = STATE.odo[remTab]   || 0;
-    const summEl = document.getElementById('remSummary');
-    summEl.innerHTML = '';
-
-    if (odo === 0 || Object.keys(maint).length === 0) {
-        summEl.innerHTML = `<div class="empty"><i class="fas fa-wrench"></i>Belum ada data. Catat servis pertama!</div>`;
-        document.getElementById('expandBtn').style.display = 'none';
-        return;
-    }
-
-    document.getElementById('expandBtn').style.display = 'block';
-
-    const items = Object.entries(maint).map(([part, d]) => {
-        const target = d.lastOdo + d.interval;
-        const sisa   = target - odo;
-        return { part, d, target, sisa };
-    }).sort((a, b) => a.sisa - b.sisa);
-
-    items.slice(0, 3).forEach(({ part, sisa }) => {
-        let cls, valTxt;
-        if (sisa <= 0)       { cls = 'chip-danger'; valTxt = `Lewat ${Math.abs(sisa).toLocaleString('id')} KM`; }
-        else if (sisa <= 500){ cls = 'chip-warn';   valTxt = `${sisa.toLocaleString('id')} KM lagi`; }
-        else                  { cls = 'chip-ok';    valTxt = `${sisa.toLocaleString('id')} KM lagi`; }
-
-        summEl.innerHTML += `
-            <div class="rem-chip ${cls}">
-                <div class="rem-chip-dot"></div>
-                <div class="rem-chip-name">${part}</div>
-                <div class="rem-chip-val">${valTxt}</div>
-            </div>`;
-    });
-
-    if (remExpanded) renderRemFull();
-}
-
-function renderRemFull() {
-    const maint = STATE.maint[remTab] || {};
-    const odo   = STATE.odo[remTab]   || 0;
-    const el    = document.getElementById('remFullList');
-    el.innerHTML = '';
-
-    const items = Object.entries(maint).map(([part, d]) => {
-        const target = d.lastOdo + d.interval;
-        const sisa   = target - odo;
-        return { part, d, target, sisa };
-    }).sort((a, b) => a.sisa - b.sisa);
-
-    items.forEach(({ part, d, target, sisa }) => {
-        let dotColor, badgeStyle, badgeTxt;
-        if (sisa <= 0) {
-            dotColor = 'var(--red)'; badgeStyle = 'background:var(--red-light);color:var(--red)';
-            badgeTxt = `⚠ Lewat ${Math.abs(sisa).toLocaleString('id')} KM`;
-        } else if (sisa <= 500) {
-            dotColor = 'var(--yellow)'; badgeStyle = 'background:var(--yellow-light);color:var(--yellow)';
-            badgeTxt = `⏳ ${sisa.toLocaleString('id')} KM lagi`;
-        } else {
-            dotColor = 'var(--green)'; badgeStyle = 'background:var(--green-light);color:var(--green)';
-            badgeTxt = `✓ ${sisa.toLocaleString('id')} KM lagi`;
-        }
-        const pct = Math.min(Math.max(((odo - d.lastOdo) / d.interval) * 100, 0), 100);
-        const barColor = sisa <= 0 ? 'var(--red)' : sisa <= 500 ? 'var(--yellow)' : 'var(--accent)';
-
-        el.innerHTML += `
-            <div class="rem-row">
-                <div class="rem-dot-col" style="background:${dotColor}"></div>
-                <div class="rem-info">
-                    <div class="rem-part">${part}</div>
-                    <div class="rem-meta">Terakhir: ${d.lastOdo.toLocaleString('id')} KM · Target: ${target.toLocaleString('id')} KM</div>
-                    <div class="rem-bar-bg" style="margin-top:5px;">
-                        <div class="rem-bar" style="width:${pct}%;background:${barColor}"></div>
-                    </div>
-                </div>
-                <div class="rem-badge" style="${badgeStyle}">${badgeTxt}</div>
-            </div>`;
-    });
-}
-
-// ════════════════════════════════════════════════════════
-//  CALENDAR
-// ════════════════════════════════════════════════════════
-function calPrev() { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } selectedDay = null; renderCalendar(); }
-function calNext() { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } selectedDay = null; renderCalendar(); }
-
-function renderCalendar() {
-    document.getElementById('calMonthLabel').textContent = BULAN[calMonth] + ' ' + calYear;
-    const today = new Date();
-
-    const txMap = {};
-    STATE.trx.forEach(t => {
-        if (!txMap[t.date]) txMap[t.date] = { harian: false, servis: false };
-        txMap[t.date][t.type] = true;
-    });
-
-    const grid     = document.getElementById('calGrid');
-    grid.innerHTML = '';
-
-    const firstDay    = new Date(calYear, calMonth, 1).getDay();
-    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-
-    for (let i = 0; i < firstDay; i++) grid.innerHTML += `<div class="cal-day"></div>`;
-
-    for (let d = 1; d <= daysInMonth; d++) {
-        const mm      = String(calMonth + 1).padStart(2, '0');
-        const dd      = String(d).padStart(2, '0');
-        const dateStr = `${calYear}-${mm}-${dd}`;
-        const isToday = (d === today.getDate() && calMonth === today.getMonth() && calYear === today.getFullYear());
-        const txInfo  = txMap[dateStr];
-
-        let cls = 'cal-day cur-month';
-        if (isToday) cls += ' today';
-        if (txInfo)  cls += ' has-trx';
-        if (selectedDay === dateStr) cls += ' selected';
-
-        let dots = '';
-        if (txInfo) {
-            if (txInfo.harian) dots += `<div class="cal-dot dot-blue"></div>`;
-            if (txInfo.servis) dots += `<div class="cal-dot dot-orange"></div>`;
-        }
-
-        grid.innerHTML += `
-            <div class="${cls}" ${txInfo ? `onclick="selectDay('${dateStr}')"` : ''}>
-                ${d}
-                ${dots ? `<div class="cal-dots">${dots}</div>` : ''}
-            </div>`;
-    }
-
     renderDayPopup();
 }
-
-function selectDay(dateStr) {
-    selectedDay = selectedDay === dateStr ? null : dateStr;
-    renderCalendar();
+function selectDay(ds){selectedDay=selectedDay===ds?null:ds;renderCalendar();}
+function renderDayPopup(){
+    const popup=document.getElementById('dayPopup');
+    if(!selectedDay){popup.style.display='none';return;}
+    const trx=STATE.trx.filter(t=>t.date===selectedDay);
+    if(!trx.length){popup.style.display='none';return;}
+    const d=new Date(selectedDay),label=d.getDate()+' '+BULAN[d.getMonth()]+' '+d.getFullYear();
+    let items='';
+    trx.forEach(t=>{const isS=t.type==='servis';items+='<div class="popup-item"><div class="popup-icon '+(isS?'s':'h')+'"><i class="fas '+(isS?'fa-wrench':'fa-gas-pump')+'"></i></div><div class="popup-info"><div class="popup-name">'+t.category+'</div><div class="popup-meta">'+(MOTOR_NAMES[t.motor]||t.motor)+' · '+(t.odo?t.odo.toLocaleString('id')+' KM':'–')+'</div></div><div class="popup-amount">'+rp(t.nominal)+'</div></div>';});
+    popup.innerHTML='<div class="day-popup"><div class="popup-date">'+label+'</div>'+items+'</div>';popup.style.display='block';
 }
 
-function renderDayPopup() {
-    const popup = document.getElementById('dayPopup');
-    if (!selectedDay) { popup.style.display = 'none'; return; }
-
-    const trx = STATE.trx.filter(t => t.date === selectedDay);
-    if (!trx.length)  { popup.style.display = 'none'; return; }
-
-    const d     = new Date(selectedDay);
-    const label = `${d.getDate()} ${BULAN[d.getMonth()]} ${d.getFullYear()}`;
-
-    let items = '';
-    trx.forEach(t => {
-        const isS = t.type === 'servis';
-        items += `
-            <div class="popup-item">
-                <div class="popup-icon ${isS ? 's' : 'h'}">
-                    <i class="fas ${isS ? 'fa-wrench' : 'fa-gas-pump'}"></i>
-                </div>
-                <div class="popup-info">
-                    <div class="popup-name">${t.category}</div>
-                    <div class="popup-meta">${MOTOR_NAMES[t.motor] || t.motor} · ${t.odo ? t.odo.toLocaleString('id') + ' KM' : '–'}</div>
-                </div>
-                <div class="popup-amount">${rp(t.nominal)}</div>
-            </div>`;
-    });
-
-    popup.innerHTML = `<div class="day-popup"><div class="popup-date">${label}</div>${items}</div>`;
-    popup.style.display = 'block';
+function toggleFullHist(){fullHistOpen=!fullHistOpen;histPage=1;document.getElementById('fullHistPanel').classList.toggle('open',fullHistOpen);document.getElementById('fullHistLabel').textContent=fullHistOpen?'Sembunyikan riwayat':'Lihat semua riwayat';document.getElementById('fullHistIcon').className=fullHistOpen?'fas fa-times':'fas fa-list';if(fullHistOpen)renderFullHist();}
+function renderFullHist(){
+    const fM=document.getElementById('fMotor').value,fT=document.getElementById('fType').value;
+    let trx=[...STATE.trx].sort((a,b)=>b.date.localeCompare(a.date)||b.createdAt-a.createdAt);
+    if(fM!=='semua')trx=trx.filter(t=>t.motor===fM);if(fT!=='semua')trx=trx.filter(t=>t.type===fT);
+    const total=trx.length,paged=trx.slice(0,histPage*HPP),list=document.getElementById('fullHistList'),pager=document.getElementById('fullHistPager');
+    list.innerHTML='';
+    if(!total){list.innerHTML='<div class="empty"><i class="fas fa-clock-rotate-left"></i>Tidak ada catatan.</div>';pager.innerHTML='';return;}
+    paged.forEach(t=>{const isS=t.type==='servis';list.innerHTML+='<div class="hist-item"><div class="hist-icon '+(isS?'s':'h')+'"><i class="fas '+(isS?'fa-wrench':'fa-gas-pump')+'"></i></div><div class="hist-info"><div class="hist-name">'+t.category+'</div><div class="hist-meta">'+(MOTOR_NAMES[t.motor]||t.motor)+' · '+(t.odo?t.odo.toLocaleString('id')+' KM':'–')+' · '+fmtDate(t.date)+'</div></div><div class="hist-amt">'+rp(t.nominal)+'</div></div>';});
+    if(paged.length<total)pager.innerHTML='<button class="show-more" onclick="histPage++;renderFullHist()">Tampilkan '+(total-paged.length)+' lagi</button>';
+    else if(total>HPP)pager.innerHTML='<button class="show-more" onclick="histPage=1;renderFullHist()">Sembunyikan</button>';
+    else pager.innerHTML='';
 }
 
-// ════════════════════════════════════════════════════════
-//  FULL HISTORY
-// ════════════════════════════════════════════════════════
-function toggleFullHist() {
-    fullHistOpen = !fullHistOpen;
-    histPage = 1;
-    document.getElementById('fullHistPanel').classList.toggle('open', fullHistOpen);
-    document.getElementById('fullHistLabel').textContent = fullHistOpen ? 'Sembunyikan riwayat' : 'Lihat semua riwayat';
-    document.getElementById('fullHistIcon').className = fullHistOpen ? 'fas fa-times' : 'fas fa-list';
-    if (fullHistOpen) renderFullHist();
+function showResetModal(){document.getElementById('resetModal').classList.add('open');}
+function closeModal(){document.getElementById('resetModal').classList.remove('open');}
+async function exportAndReset(){exportCSV();setTimeout(async()=>{closeModal();await doReset();},400);}
+async function doReset(){
+    closeModal();setSyncStatus('syncing');
+    try{await window._fs.fsDeleteAllTrx();await window._fs.fsSetSettings({odo:{BeatDLX:0,BeatPop:0},maint:{BeatDLX:{},BeatPop:{}},budget:420000});setSyncStatus('ok');location.reload();}
+    catch(e){setSyncStatus('error');toast('⚠️ Gagal reset. Cek koneksi internet.');}
 }
-
-function renderFullHist() {
-    const fM = document.getElementById('fMotor').value;
-    const fT = document.getElementById('fType').value;
-    let trx  = [...STATE.trx].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
-    if (fM !== 'semua') trx = trx.filter(t => t.motor === fM);
-    if (fT !== 'semua') trx = trx.filter(t => t.type  === fT);
-
-    const total = trx.length;
-    const paged = trx.slice(0, histPage * HIST_PER_PAGE);
-    const list  = document.getElementById('fullHistList');
-    const pager = document.getElementById('fullHistPager');
-    list.innerHTML = '';
-
-    if (!total) {
-        list.innerHTML = `<div class="empty"><i class="fas fa-clock-rotate-left"></i>Tidak ada catatan.</div>`;
-        pager.innerHTML = '';
-        return;
-    }
-
-    paged.forEach(t => {
-        const isS = t.type === 'servis';
-        list.innerHTML += `
-            <div class="hist-item">
-                <div class="hist-icon ${isS ? 's' : 'h'}">
-                    <i class="fas ${isS ? 'fa-wrench' : 'fa-gas-pump'}"></i>
-                </div>
-                <div class="hist-info">
-                    <div class="hist-name">${t.category}</div>
-                    <div class="hist-meta">${MOTOR_NAMES[t.motor] || t.motor} · ${t.odo ? t.odo.toLocaleString('id') + ' KM' : '–'} · ${fmtDate(t.date)}</div>
-                </div>
-                <div class="hist-amt">${rp(t.nominal)}</div>
-            </div>`;
-    });
-
-    if (paged.length < total)
-        pager.innerHTML = `<button class="show-more" onclick="histPage++;renderFullHist()">Tampilkan ${total - paged.length} lagi</button>`;
-    else if (total > HIST_PER_PAGE)
-        pager.innerHTML = `<button class="show-more" onclick="histPage=1;renderFullHist()">Sembunyikan</button>`;
-    else
-        pager.innerHTML = '';
+function exportCSV(){
+    const trx=[...STATE.trx].sort((a,b)=>a.date.localeCompare(b.date));
+    if(!trx.length){toast('⚠️ Tidak ada data untuk diekspor');return;}
+    const header=['Tanggal','Motor','Jenis','Kategori','Odometer (KM)','Biaya (Rp)'];
+    const rows=trx.map(t=>[t.date,MOTOR_NAMES[t.motor]||t.motor,t.type==='servis'?'Servis/Part':'Harian/Rutin',t.category,t.odo||'',t.nominal]);
+    const csv=[header,...rows].map(r=>r.map(v=>'"'+v+'"').join(',')).join('\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='transpotrack_backup_'+new Date().toISOString().slice(0,10)+'.csv';a.click();URL.revokeObjectURL(url);
 }
-
-// ════════════════════════════════════════════════════════
-//  RESET
-// ════════════════════════════════════════════════════════
-function showResetModal() { document.getElementById('resetModal').classList.add('open'); }
-function closeModal()      { document.getElementById('resetModal').classList.remove('open'); }
-
-async function exportAndReset() {
-    exportCSV();
-    setTimeout(async () => { closeModal(); await doReset(); }, 400);
-}
-
-async function doReset() {
-    closeModal();
-    setSyncStatus('syncing');
-    try {
-        await window._fs.fsDeleteAllTrx();
-        await window._fs.fsSetSettings({ odo: { BeatDLX: 0, BeatPop: 0 }, maint: { BeatDLX: {}, BeatPop: {} }, budget: 420000 });
-        setSyncStatus('ok');
-        location.reload();
-    } catch(e) {
-        setSyncStatus('error');
-        toast('⚠️ Gagal reset. Cek koneksi internet.');
-    }
-}
-
-function exportCSV() {
-    const trx = [...STATE.trx].sort((a, b) => a.date.localeCompare(b.date));
-    if (!trx.length) { toast('⚠️ Tidak ada data untuk diekspor'); return; }
-
-    const header = ['Tanggal','Motor','Jenis','Kategori','Odometer (KM)','Biaya (Rp)'];
-    const rows   = trx.map(t => [
-        t.date, MOTOR_NAMES[t.motor] || t.motor,
-        t.type === 'servis' ? 'Servis/Part' : 'Harian/Rutin',
-        t.category, t.odo || '', t.nominal
-    ]);
-
-    const csv  = [header, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url;
-    a.download = `transpotrack_backup_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
-
-// ════════════════════════════════════════════════════════
-//  UTILS
-// ════════════════════════════════════════════════════════
-function rp(n) {
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
-}
-
-function fmtDate(s) {
-    const d = new Date(s);
-    return `${d.getDate()} ${BULAN[d.getMonth()].slice(0,3)} ${d.getFullYear()}`;
-}
-
-function toast(msg, isGreen) {
-    const el = document.getElementById('toast');
-    el.textContent = msg;
-    el.className = 'toast show' + (isGreen ? ' green' : '');
-    clearTimeout(el._t);
-    el._t = setTimeout(() => el.classList.remove('show'), 2800);
-}
-
-// ════════════════════════════════════════════════════════
-//  BOOT
-// ════════════════════════════════════════════════════════
-window.onload = init;
+function rp(n){return new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',minimumFractionDigits:0}).format(n||0);}
+function fmtDate(s){const d=new Date(s);return d.getDate()+' '+BULAN[d.getMonth()].slice(0,3)+' '+d.getFullYear();}
+function toast(msg,isGreen){const el=document.getElementById('toast');el.textContent=msg;el.className='toast show'+(isGreen?' green':'');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2800);}
+window.onload=init;
 </script>
 </body>
 </html>
