@@ -645,6 +645,12 @@ async function deleteTrx(id) {
         if(selectedDay) renderDayPopup();
         if(fullHistOpen) renderFullHist();
         updateDashboard(); renderReminder(); renderPartPage(); renderCalendar(); updateOdoPlaceholder();
+        
+        // --- TAMBAHAN FIX BUG BANNER ---
+        alertDismissed = false; 
+        showAlertBanner();
+        // -------------------------------
+        
         toast("✅ Transaksi dihapus");
     } catch(e) {
         setSyncStatus('error');
@@ -692,6 +698,12 @@ async function saveEdit() {
         if(selectedDay) renderDayPopup();
         if(fullHistOpen) renderFullHist();
         updateDashboard(); renderReminder(); renderPartPage(); renderCalendar(); updateOdoPlaceholder();
+        
+        // --- TAMBAHAN FIX BUG BANNER ---
+        alertDismissed = false; 
+        showAlertBanner();
+        // -------------------------------
+        
         toast("✅ Transaksi diperbarui");
     } catch(e) {
         setSyncStatus('error');
