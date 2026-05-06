@@ -1,3 +1,16 @@
+Sempurna, Amoira! Pemahamanmu soal alur *backend* sangat tepat. Menambahkan logika "Rekalkulasi Otomatis" saat proses edit/hapus akan memastikan sistem *reminder* Odometer tetap konsisten tanpa perlu disetting ulang secara manual.
+
+Aku sudah mengintegrasikan fungsionalitas Edit (✏️) dan Hapus (🗑️) langsung ke kode *backbone* yang kamu berikan. 
+
+**Perubahan yang dilakukan (Tanpa merusak bagian lain):**
+1.  **Fungsi Firebase Baru:** Menambahkan `deleteDoc` dan `updateDoc` di modul *Firebase* untuk menghapus dan memperbarui data *online* secara *real-time*.
+2.  **Tombol Edit/Hapus:** Menambahkan tombol aksi pada *popup* kalender harian dan panel "Lihat Semua Riwayat".
+3.  **Modal Edit:** Menambahkan *overlay form* baru khusus untuk mengedit Motor, Odometer, dan Biaya pada transaksi yang sudah lalu (Kategori sengaja dikunci agar tidak merusak logika *interval maintenance*).
+4.  **Logika Rekalkulasi Otomatis (`recalcSettings`):** Setiap kali ada data yang dihapus atau diedit, fungsi ini akan otomatis mengurutkan semua transaksi yang tersisa dari yang terlama ke terbaru, lalu menghitung ulang *Odometer* terkini dan *Jadwal Servis Terakhir* untuk kedua motor secara otomatis.
+
+Berikut adalah kode final yang sudah direvisi. Kamu bisa langsung menempelkannya ke *file* `index.html` aplikasimu:
+
+```html:Tracker Transportasi Amoira:index.html
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -9,7 +22,7 @@
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, orderBy }
+import { getFirestore, doc, getDoc, setDoc, collection, addDoc, getDocs, deleteDoc, query, orderBy, updateDoc }
     from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
 const firebaseConfig = {
     apiKey: "AIzaSyAb0J1iT9Sa-1w4tlUjJLjIehuhgWuzF_A",
@@ -27,7 +40,9 @@ async function fsSetSettings(d){await setDoc(settingsRef,d,{merge:true})}
 async function fsGetTrx(){try{const q=query(trxCol,orderBy('date','asc'));const s=await getDocs(q);return s.docs.map(d=>({...d.data(),_id:d.id}))}catch(e){return[]}}
 async function fsAddTrx(t){const r=await addDoc(trxCol,t);return r.id}
 async function fsDeleteAllTrx(){const s=await getDocs(trxCol);await Promise.all(s.docs.map(d=>deleteDoc(d.ref)))}
-window._fs={fsGetSettings,fsSetSettings,fsGetTrx,fsAddTrx,fsDeleteAllTrx};
+async function fsDeleteTrx(id){await deleteDoc(doc(trxCol, id))}
+async function fsUpdateTrx(id, data){await updateDoc(doc(trxCol, id), data)}
+window._fs={fsGetSettings,fsSetSettings,fsGetTrx,fsAddTrx,fsDeleteAllTrx,fsDeleteTrx,fsUpdateTrx};
 window._fsReady=true;
 document.dispatchEvent(new Event('fs-ready'));
 </script>
@@ -211,6 +226,12 @@ main{max-width:520px;margin:0 auto;padding:16px}
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+
+/* ACTION BUTTONS CSS */
+.action-btns{display:flex;gap:6px;flex-shrink:0}
+.act-btn{background:transparent;border:1px solid var(--border);border-radius:6px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-muted);font-size:12px;transition:all .2s}
+.act-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--surface2)}
+.act-btn.del:hover{border-color:var(--red);color:var(--red);background:var(--red-light)}
 </style>
 </head>
 <body>
@@ -329,6 +350,24 @@ main{max-width:520px;margin:0 auto;padding:16px}
 </div>
 </div>
 
+<!-- MODAL EDIT TRANSAKSI -->
+<div class="modal-overlay" id="editModal">
+<div class="modal">
+<div class="modal-icon" style="color:var(--accent); margin-bottom: 8px;"><i class="fas fa-pen-to-square"></i></div><div class="modal-title">Edit Transaksi</div>
+<div class="modal-body" style="text-align:left;">
+<input type="hidden" id="editId">
+<div class="field"><label class="field-label">Motor</label><div class="sel-wrap"><select class="inp" id="editMotor"><option value="BeatDLX">Beat Deluxe</option><option value="BeatPop">Beat Pop</option></select></div></div>
+<div class="field"><label class="field-label">Kategori (Dikunci)</label><input class="inp" type="text" id="editCat" disabled style="background:var(--surface2);opacity:0.7;font-weight:bold;"></div>
+<div class="field"><label class="field-label">Odometer</label><input class="inp" type="number" id="editOdo"></div>
+<div class="field"><label class="field-label">Biaya (Rp)</label><input class="inp" type="number" id="editBiaya"></div>
+</div>
+<div class="modal-btns">
+<button class="mbtn export" onclick="saveEdit()"><i class="fas fa-save"></i> Simpan Update</button>
+<button class="mbtn cancel" onclick="closeEditModal()">Batal</button>
+</div>
+</div>
+</div>
+
 <script>
 const MOTOR_NAMES={BeatDLX:'Beat Deluxe',BeatPop:'Beat Pop'};
 const BULAN=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
@@ -370,6 +409,35 @@ async function saveSettings(){
     setSyncStatus('syncing');
     try{await window._fs.fsSetSettings({odo:STATE.odo,maint:STATE.maint,budget:STATE.budget});setSyncStatus('ok');}
     catch(e){setSyncStatus('error');toast('⚠️ Gagal menyimpan ke cloud.');}
+}
+
+// LOGIKA REKALKULASI (Auto-Rebuild)
+function recalcSettings() {
+    let newOdo = {BeatDLX: 0, BeatPop: 0};
+    let newMaint = {BeatDLX: {}, BeatPop: {}};
+    
+    // Pertahankan interval yang lama (khususnya untuk Oli yang custom)
+    for(let m of ['BeatDLX', 'BeatPop']) {
+        for(let cat in STATE.maint[m]) {
+            newMaint[m][cat] = { lastOdo: 0, interval: STATE.maint[m][cat].interval };
+        }
+    }
+    
+    // Urutkan transaksi dari terlama ke terbaru
+    let sortedTrx = [...STATE.trx].sort((a,b) => a.createdAt - b.createdAt || a.date.localeCompare(b.date));
+    
+    sortedTrx.forEach(t => {
+        if(t.odo) newOdo[t.motor] = Math.max(newOdo[t.motor], t.odo);
+        if(t.type === 'servis') {
+            let iv = INTERVALS[t.category] || 10000;
+            // Jika kategori Oli Mesin, cek apakah sudah ada interval custom sebelumnya
+            if(t.category === 'Oli Mesin') iv = (newMaint[t.motor]['Oli Mesin'] && newMaint[t.motor]['Oli Mesin'].interval) || 2000;
+            newMaint[t.motor][t.category] = { lastOdo: t.odo, interval: iv };
+        }
+    });
+    
+    STATE.odo = newOdo;
+    STATE.maint = newMaint;
 }
 
 function showAlertBanner(){
@@ -552,7 +620,10 @@ function renderDayPopup(){
     if(!trx.length){popup.style.display='none';return;}
     const d=new Date(selectedDay),label=d.getDate()+' '+BULAN[d.getMonth()]+' '+d.getFullYear();
     let items='';
-    trx.forEach(t=>{const isS=t.type==='servis';items+='<div class="popup-item"><div class="popup-icon '+(isS?'s':'h')+'"><i class="fas '+(isS?'fa-wrench':'fa-gas-pump')+'"></i></div><div class="popup-info"><div class="popup-name">'+t.category+'</div><div class="popup-meta">'+(MOTOR_NAMES[t.motor]||t.motor)+' · '+(t.odo?t.odo.toLocaleString('id')+' KM':'–')+'</div></div><div class="popup-amount">'+rp(t.nominal)+'</div></div>';});
+    trx.forEach(t=>{
+        const isS=t.type==='servis';
+        items+='<div class="popup-item"><div class="popup-icon '+(isS?'s':'h')+'"><i class="fas '+(isS?'fa-wrench':'fa-gas-pump')+'"></i></div><div class="popup-info"><div class="popup-name">'+t.category+'</div><div class="popup-meta">'+(MOTOR_NAMES[t.motor]||t.motor)+' · '+(t.odo?t.odo.toLocaleString('id')+' KM':'–')+'</div></div><div class="popup-amount" style="margin-right:10px;">'+rp(t.nominal)+'</div><div class="action-btns"><button class="act-btn" onclick="openEditModal(\''+t._id+'\')"><i class="fas fa-edit"></i></button><button class="act-btn del" onclick="deleteTrx(\''+t._id+'\')"><i class="fas fa-trash"></i></button></div></div>';
+    });
     popup.innerHTML='<div class="day-popup"><div class="popup-date">'+label+'</div>'+items+'</div>';popup.style.display='block';
 }
 
@@ -564,10 +635,81 @@ function renderFullHist(){
     const total=trx.length,paged=trx.slice(0,histPage*HPP),list=document.getElementById('fullHistList'),pager=document.getElementById('fullHistPager');
     list.innerHTML='';
     if(!total){list.innerHTML='<div class="empty"><i class="fas fa-clock-rotate-left"></i>Tidak ada catatan.</div>';pager.innerHTML='';return;}
-    paged.forEach(t=>{const isS=t.type==='servis';list.innerHTML+='<div class="hist-item"><div class="hist-icon '+(isS?'s':'h')+'"><i class="fas '+(isS?'fa-wrench':'fa-gas-pump')+'"></i></div><div class="hist-info"><div class="hist-name">'+t.category+'</div><div class="hist-meta">'+(MOTOR_NAMES[t.motor]||t.motor)+' · '+(t.odo?t.odo.toLocaleString('id')+' KM':'–')+' · '+fmtDate(t.date)+'</div></div><div class="hist-amt">'+rp(t.nominal)+'</div></div>';});
+    paged.forEach(t=>{
+        const isS=t.type==='servis';
+        list.innerHTML+='<div class="hist-item"><div class="hist-icon '+(isS?'s':'h')+'"><i class="fas '+(isS?'fa-wrench':'fa-gas-pump')+'"></i></div><div class="hist-info"><div class="hist-name">'+t.category+'</div><div class="hist-meta">'+(MOTOR_NAMES[t.motor]||t.motor)+' · '+(t.odo?t.odo.toLocaleString('id')+' KM':'–')+' · '+fmtDate(t.date)+'</div></div><div class="hist-amt" style="margin-right:10px;">'+rp(t.nominal)+'</div><div class="action-btns"><button class="act-btn" onclick="openEditModal(\''+t._id+'\')"><i class="fas fa-edit"></i></button><button class="act-btn del" onclick="deleteTrx(\''+t._id+'\')"><i class="fas fa-trash"></i></button></div></div>';
+    });
     if(paged.length<total)pager.innerHTML='<button class="show-more" onclick="histPage++;renderFullHist()">Tampilkan '+(total-paged.length)+' lagi</button>';
     else if(total>HPP)pager.innerHTML='<button class="show-more" onclick="histPage=1;renderFullHist()">Sembunyikan</button>';
     else pager.innerHTML='';
+}
+
+// LOGIKA HAPUS DAN EDIT TRANSAKSI
+async function deleteTrx(id) {
+    if(!confirm("Yakin ingin menghapus transaksi ini?")) return;
+    setSyncStatus('syncing');
+    try {
+        await window._fs.fsDeleteTrx(id);
+        STATE.trx = STATE.trx.filter(t => t._id !== id);
+        recalcSettings(); // Hitung ulang odometer & maintenance
+        await saveSettings();
+        
+        // Refresh UI
+        if(selectedDay) renderDayPopup();
+        if(fullHistOpen) renderFullHist();
+        updateDashboard(); renderReminder(); renderPartPage(); renderCalendar(); updateOdoPlaceholder();
+        toast("✅ Transaksi dihapus");
+    } catch(e) {
+        setSyncStatus('error');
+        toast("⚠️ Gagal menghapus transaksi");
+    }
+}
+
+function openEditModal(id) {
+    const t = STATE.trx.find(x => x._id === id);
+    if(!t) return;
+    document.getElementById('editId').value = t._id;
+    document.getElementById('editMotor').value = t.motor;
+    document.getElementById('editCat').value = t.category;
+    document.getElementById('editOdo').value = t.odo || '';
+    document.getElementById('editBiaya').value = t.nominal;
+    document.getElementById('editModal').classList.add('open');
+}
+
+function closeEditModal() { document.getElementById('editModal').classList.remove('open'); }
+
+async function saveEdit() {
+    const id = document.getElementById('editId').value;
+    const motor = document.getElementById('editMotor').value;
+    const odo = parseInt(document.getElementById('editOdo').value) || 0;
+    const nominal = parseInt(document.getElementById('editBiaya').value) || 0;
+    
+    const t = STATE.trx.find(x => x._id === id);
+    if(!t) return;
+    
+    setSyncStatus('syncing');
+    closeEditModal();
+    try {
+        const newData = { motor, odo, nominal };
+        await window._fs.fsUpdateTrx(id, newData);
+        
+        // Update state lokal
+        t.motor = motor;
+        t.odo = odo;
+        t.nominal = nominal;
+        
+        recalcSettings(); // Hitung ulang odometer & maintenance
+        await saveSettings();
+        
+        // Refresh UI
+        if(selectedDay) renderDayPopup();
+        if(fullHistOpen) renderFullHist();
+        updateDashboard(); renderReminder(); renderPartPage(); renderCalendar(); updateOdoPlaceholder();
+        toast("✅ Transaksi diperbarui");
+    } catch(e) {
+        setSyncStatus('error');
+        toast("⚠️ Gagal memperbarui transaksi");
+    }
 }
 
 function showResetModal(){document.getElementById('resetModal').classList.add('open');}
